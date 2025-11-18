@@ -4,6 +4,7 @@ import Image from "next/image";
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useSession } from "@/modules/core/hooks/useSession";
+import { redirectToTenantDomain } from "@/modules/core/utils/tenant";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -24,8 +25,13 @@ export default function LoginPage() {
     setError(null);
     setIsLoading(true);
     try {
-      await login({ login: loginField, senha });
-      router.push("/dashboard");
+      const sessionData = await login({ login: loginField, senha });
+      const redirected = redirectToTenantDomain(sessionData.tenant, {
+        path: "/dashboard",
+      });
+      if (!redirected) {
+        router.push("/dashboard");
+      }
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Falha ao autenticar";
@@ -41,7 +47,7 @@ export default function LoginPage() {
         <div className="flex flex-col items-center gap-2 mb-8">
           <div className="flex justify-center mb-8">
             <Image
-              src="https://www.goldpdv.com.br/img/logo.png"
+              src="https://www.nortesoft.com.br/img/logo.png"
               alt="goldPDV - Gestao Empresarial"
               width={180}
               height={48}

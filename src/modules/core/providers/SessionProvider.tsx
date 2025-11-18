@@ -15,6 +15,7 @@ import {
 } from "@/modules/core/types";
 import { authenticate } from "@/modules/auth/services/authService";
 import { SESSION_STORAGE_KEY } from "@/modules/core/constants/storage";
+import { redirectToTenantDomain } from "@/modules/core/utils/tenant";
 
 interface SessionContextValue {
   session: SessionData | null;
@@ -60,6 +61,13 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       mounted = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!session?.tenant) {
+      return;
+    }
+    redirectToTenantDomain(session.tenant);
+  }, [session]);
 
   const persistSession = useCallback((value: SessionData | null) => {
     setSession(value);

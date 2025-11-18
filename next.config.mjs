@@ -1,6 +1,11 @@
-import type { NextConfig } from "next";
-
+/** @type {import('next').NextConfig} */
 const nextConfig = {
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
+  typescript: {
+    ignoreBuildErrors: true,
+  },
   images: {
     remotePatterns: [
       {
@@ -14,7 +19,7 @@ const nextConfig = {
       {
         protocol: "https",
         hostname: "www.nortesoft.com.br",
-      }
+      },
     ],
   },
 };

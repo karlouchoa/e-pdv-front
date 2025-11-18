@@ -2,7 +2,7 @@ import type { SessionData } from "@/modules/core/types";
 import { SESSION_STORAGE_KEY } from "@/modules/core/constants/storage";
 
 const DEFAULT_API_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3000";
+  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3023";
 
 const TENANT_DOMAIN_TEMPLATE =
   process.env.NEXT_PUBLIC_TENANT_DOMAIN_TEMPLATE ??

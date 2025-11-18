@@ -4,14 +4,10 @@ import Image from "next/image";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useSession } from "@/modules/core/hooks/useSession";
 import { SectionCard } from "@/modules/core/components/SectionCard";
-import {
-  ItemSavePayload,
-  listCategories,
-  listProducts,
-  saveItem,
-} from "@/modules/catalog/services/catalogService";
+import type { ItemSavePayload } from "@/modules/catalog/services/catalogService";
 import { Category, ProductPayload } from "@/modules/core/types";
 import { formatDate } from "@/modules/core/utils/formatters";
+import { api } from "@/modules/core/services/api";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -280,16 +276,16 @@ export default function ProductsPage() {
     setLoading(true);
     try {
       const [itemsResponse, categoriesResponse] = await Promise.all([
-        listProducts(session),
-        listCategories(session),
+        api.get("/T_ITENS", { params: { tabela: "T_ITENS" } }),
+        api.get("/T_GRITENS"),
       ]);
 
-      const rawCategories = extractArray<Category>(categoriesResponse);
+      const rawCategories = extractArray<Category>(categoriesResponse.data);
       const normalizedCategories = rawCategories.map((category, index) =>
         mapCategoryMetadata(category, `cat-${index}`),
       );
 
-      const rawItems = extractArray<AnyRecord>(itemsResponse);
+      const rawItems = extractArray<AnyRecord>(itemsResponse.data);
       const normalizedItems = rawItems.map((item, index) =>
         normalizeItemFromApi(item, normalizedCategories, `item-${index}`),
       );
@@ -394,7 +390,12 @@ export default function ProductsPage() {
     setSaving(true);
     setFeedback(null);
     try {
-      await saveItem(session, buildSavePayload(form));
+      const payload = buildSavePayload(form);
+      if (form.id) {
+        await api.patch(`/T_ITENS/${form.id}`, payload);
+      } else {
+        await api.post("/T_ITENS", payload);
+      }
       await loadData();
       setFeedback(
         form.id ? "Item atualizado com sucesso." : "Item cadastrado com sucesso.",

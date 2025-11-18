@@ -1,19 +1,29 @@
 import { NextRequest, NextResponse } from "next/server";
 
 export function middleware(req: NextRequest) {
-  const hostname = req.headers.get("host") || "";
+  const hostname = (req.headers.get("host") || "").toLowerCase();
   const url = req.nextUrl.clone();
 
+  const baseHosts = [
+    "goldpdv.com.br",
+    "www.goldpdv.com.br",
+    "localhost:3000",
+    "localhost:3001",
+  ];
+
+  if (baseHosts.includes(hostname)) {
+    return NextResponse.next();
+  }
+
   const currentHost = hostname
-    .replace(".localhost:3001", "")   // desenvolvimento
-    .replace(".goldpdv.com.br", "");   // producao
+    .replace(".localhost:3001", "") // desenvolvimento
+    .replace(".localhost:3000", "")
+    .replace(".goldpdv.com.br", ""); // producao
 
   const tenantId = currentHost;
 
-  // opcional: validar tenantId com uma lista ou endpoint
   if (!tenantId || tenantId === "www") {
-    url.pathname = "/404";
-    return NextResponse.rewrite(url);
+    return NextResponse.next();
   }
 
   const res = NextResponse.next();
