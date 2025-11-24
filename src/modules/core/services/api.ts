@@ -16,6 +16,18 @@ function detectTenantBaseUrl(): string {
   // Ambiente local → backend local
   if (isLocal) {
     return "http://localhost:3023";
+  } else {
+    console.log("Host detectado:", host);
+    console.log("Em produção");
+    const baseHosts = [
+      "goldpdv.com.br",
+      "www.goldpdv.com.br",
+    ];
+
+    // Domínio base → produção oficial
+    if (baseHosts.includes(host)) {
+      return `https://${host}`;
+    }
   }
 
   // Produção → montar dinamicamente
@@ -51,6 +63,14 @@ api.interceptors.request.use((config) => {
 
       if (token) config.headers.Authorization = `Bearer ${token}`;
       if (tenant) config.headers["X-Tenant"] = tenant;
+
+      const fullUrl = `${config.baseURL}${config.url}`;
+      console.log("[AXIOS REQUEST] URL:", fullUrl);
+    
+      if (config.params) {
+        console.log("[AXIOS REQUEST] Params:", config.params);
+      }
+
     }
   } catch (err) {
     console.error("Erro ao ler session:", err);

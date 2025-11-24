@@ -89,6 +89,31 @@ const getStringValue = (
   return fallback;
 };
 
+
+function mapFormToPayload(form: any) {
+  return {
+    id: form.id ?? null,
+    name: form.name,
+    description: form.description,
+    unit: form.unit,
+    category: form.category,
+    salePrice: Number(form.salePrice ?? 0),
+    costPrice: Number(form.costPrice ?? 0),
+    leadTimeDays: Number(form.leadTimeDays ?? 0),
+    ncm: form.ncm,
+    cest: form.cest,
+    cst: form.cst,
+    barcode: form.barcode,
+    isComposed: Boolean(form.isComposed),
+    isRawMaterial: Boolean(form.isRawMaterial),
+    notes: form.notes,
+    imagePath: form.imagePath,
+    itprodsn: form.itprodsn ? "S" : "N",
+    matprima: form.isRawMaterial ? "S" : "N",
+  };
+}
+
+
 const getNumberValue = (
   record: AnyRecord,
   keys: string[],
@@ -279,6 +304,8 @@ export default function ProductsPage() {
         api.get("/T_ITENS", { params: { tabela: "T_ITENS" } }),
         api.get("/T_GRITENS"),
       ]);
+      
+      console.log("Resposta itens:", itemsResponse.data);
 
       const rawCategories = extractArray<Category>(categoriesResponse.data);
       const normalizedCategories = rawCategories.map((category, index) =>
@@ -390,10 +417,16 @@ export default function ProductsPage() {
     setSaving(true);
     setFeedback(null);
     try {
+
+      
       const payload = buildSavePayload(form);
       if (form.id) {
+        console.log("Atualizando item ID", form.id, "com payload:", payload);
         await api.patch(`/T_ITENS/${form.id}`, payload);
       } else {
+        
+        const payload = mapFormToPayload(form);
+        console.log("Criando novo item com payload:", payload);
         await api.post("/T_ITENS", payload);
       }
       await loadData();
@@ -492,7 +525,7 @@ export default function ProductsPage() {
                 value={form.sku}
                 onChange={(event) => handleInputChange("sku", event.target.value)}
                 className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2"
-                required
+                readOnly
               />
             </div>
             <div>

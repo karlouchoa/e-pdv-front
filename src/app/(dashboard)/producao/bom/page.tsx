@@ -380,6 +380,8 @@ export default function BomPage() {
     number | null
   >(null);
 
+  const [version, setVersion] = useState("1.0");
+
   useEffect(() => {
     quantityInputsRef.current = quantityInputsRef.current.slice(0, items.length);
     unitCostInputsRef.current = unitCostInputsRef.current.slice(0, items.length);
@@ -423,7 +425,6 @@ export default function BomPage() {
         // const rawItems = Array.isArray(response) ? response : [];
 
         const rawItems: AnyRecord[] = extractArray<AnyRecord>(response);
-
 
         const normalized = rawItems
           .map((item, index) =>
@@ -474,6 +475,20 @@ export default function BomPage() {
           selectedProduct.code,
         );
 
+        console.log("🔎 Resposta do backend (BOM):", response);
+
+        // 1️⃣ Preencher versão no formulário
+        if (response.version) {
+          setBomData((prev) => ({
+            ...prev,
+            version: response.version,
+            lotSize: Number(response.lot_size ?? prev.lotSize),
+            validityDays: Number(response.validity_days ?? prev.validityDays),
+            marginTarget: Number(response.margin_target ?? prev.marginTarget),
+            marginAchieved: Number(response.margin_achieved ?? prev.marginAchieved),
+          }));
+        }
+
         if (cancelled) return;
         const rawItems = extractArray<AnyRecord>(response);
         const normalized = rawItems
@@ -508,6 +523,11 @@ export default function BomPage() {
       cancelled = true;
     };
   }, [session, selectedProduct]);
+
+  const normalizeDecimal = (v: any) => {
+    if (typeof v === "string") return v.replace(",", ".");
+    return v;
+  };
 
   const totals = useMemo(() => {
     return calculateBomTotals({
@@ -582,10 +602,12 @@ export default function BomPage() {
     setSelectedProduct(item);
     setProductSearch(buildDisplayLabel(item));
     setShowProductResults(false);
+
     setBomData((prev) => ({
       ...prev,
       productCode: item.code,
     }));
+
     requestAnimationFrame(() => {
       materialSearchInputRef.current?.focus();
     });
@@ -705,105 +727,6 @@ export default function BomPage() {
     }
   };
 
-  // const handleSave = async (event: FormEvent) => {
-  //   event.preventDefault();
-  //   if (!session) return;
-  //   setFeedback(null);
-
-  //   const productCode = String(bomData.productCode ?? "").trim();
-  //   const lotSize = Number(bomData.lotSize);
-  //   const validityDays = Number(bomData.validityDays);
-  //   const marginTarget = Number(bomData.marginTarget);
-  //   const marginAchievedValue = Number.isFinite(totals.marginAchieved)
-  //     ? totals.marginAchieved
-  //     : Number(bomData.marginAchieved);
-
-  //   const sanitizedItems: BomItemPayload[] = items.map((item) => {
-  //     const componentCode = String(item.componentCode ?? "").trim();
-  //     const description = String(item.description ?? "").trim();
-  //     const quantity = Number(item.quantity);
-  //     const unitCost = Number(item.unitCost);
-  //     return {
-  //       ...item,
-  //       componentCode,
-  //       description,
-  //       quantity,
-  //       unitCost,
-  //     };
-  //   });
-
-  //   const hasInvalidFilledItem = sanitizedItems.some((item) => {
-  //     if (!item.componentCode) return false;
-  //     return !isValidBomItem(item);
-  //   });
-
-  //   const validItems = sanitizedItems.filter((item) => isValidBomItem(item));
-
-  //   const validationError = (() => {
-  //     if (!productCode) {
-  //       return "Informe um produto valido antes de salvar.";
-  //     }
-  //     if (productCode.length > MAX_CODE_LENGTH) {
-  //       return "O codigo do produto deve ter no maximo 80 caracteres.";
-  //     }
-  //     if (!Number.isFinite(lotSize) || lotSize < MIN_LOT_SIZE) {
-  //       return "O lote padrao precisa ser maior ou igual a 0.0001.";
-  //     }
-  //     if (
-  //       !Number.isFinite(validityDays) ||
-  //       validityDays < 0 ||
-  //       !Number.isInteger(validityDays)
-  //     ) {
-  //       return "A validade deve ser um numero inteiro maior ou igual a zero.";
-  //     }
-  //     if (!Number.isFinite(marginTarget) || marginTarget < 0) {
-  //       return "A margem alvo precisa ser um numero valido e nao negativo.";
-  //     }
-  //     if (!Number.isFinite(marginAchievedValue)) {
-  //       return "A margem calculada esta invalida, revise os valores.";
-  //     }
-  //     if (hasInvalidFilledItem) {
-  //       return "Revise as materias-primas: codigo (ate 80 caracteres), quantidade > 0 e custo >= 0.";
-  //     }
-  //     if (validItems.length === 0) {
-  //       return "Adicione pelo menos uma materia-prima valida antes de salvar.";
-  //     }
-  //     return null;
-  //   })();
-
-  //   if (validationError) {
-  //     setFeedback(validationError);
-  //     return;
-  //   }
-
-  //   setSaving(true);
-  //   try {
-  //     const payload: BomPayload = {
-  //       ...bomData,
-  //       productCode,
-  //       lotSize,
-  //       validityDays,
-  //       marginTarget,
-  //       marginAchieved: marginAchievedValue,
-  //       items: validItems,
-  //     };
-
-  //     console.log("PAYLOAD FINAL:", payload);  // <= AQUI
-
-  //     const saved = await createBom(session, payload);
-
-  //     setBoms((prev) => [saved, ...prev]);
-  //     setFeedback("BOM salva com sucesso");
-  //   } catch (error) {
-  //     setFeedback(
-  //       error instanceof Error ? error.message : "Falha ao salvar BOM",
-  //     );
-  //   } finally {
-  //     setSaving(false);
-  //   }
-
-  // };
-
   const handleSave = async (event: FormEvent) => {
     event.preventDefault();
     if (!session) return;
@@ -907,11 +830,13 @@ export default function BomPage() {
       console.log("📌 BOM salva com sucesso:", savedBom);
   
       // adiciona no topo da lista
-      setBoms((prev) => [savedBom, ...prev]);
- 
+
       const savedId = savedBom.id;
       const fullBom = await api.get(`/production/bom/${savedId}`);
-      setBoms((prev) => [fullBom.data, ...prev]);
+      setBoms(prev => {
+        const filtered = prev.filter(b => b.id !== savedId);
+        return [fullBom.data, ...filtered];
+      });
 
       setFeedback("BOM salva com sucesso!");
 
@@ -989,7 +914,7 @@ export default function BomPage() {
         </div>
       ) : null}
       <SectionCard
-        title="Ficha tecnica / BOM"
+        title="Ficha técnica"
         description="Estrutura do produto acabado e custos diretos"
         action={
           <button
@@ -1005,7 +930,7 @@ export default function BomPage() {
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div>
               <label className="text-xs font-semibold text-slate-500">
-                Buscar produto com composição (ITPRODSN = &apos;S&apos;)
+                Buscar produto com composição
               </label>
               <input
                 ref={productSearchInputRef}
@@ -1058,7 +983,7 @@ export default function BomPage() {
 
             <div>
               <label className="text-xs font-semibold text-slate-500">
-                Buscar matéria-prima (MATPRIMA = &apos;S&apos;)
+                Buscar matéria-prima
               </label>
               <input
                 ref={materialSearchInputRef}
@@ -1152,7 +1077,7 @@ export default function BomPage() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
-          <div>
+          <div className="md:col-span-1">
             <label className="text-xs font-semibold text-slate-500">
               Produto
             </label>
@@ -1164,15 +1089,41 @@ export default function BomPage() {
               onChange={(event) =>
                 setBomData({ ...bomData, productCode: event.target.value })
               }
-              required
-              className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2"
+              readOnly
+              className="mt-1 w-full 
+                         border 
+                         border-slate-200 
+                         rounded-xl 
+                         px-3 py-2
+                         bg-slate-50"
             />
           </div>
-          <div>
+          <div className="md:col-span-2">
+            <label className="text-xs font-semibold text-slate-500">
+              Descrição
+            </label>
+            <input
+              value={selectedProduct ? selectedProduct.name : ""}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") e.preventDefault();
+              }}
+              readOnly
+              className="mt-1 w-full 
+                         border border-slate-200 
+                         rounded-xl 
+                         px-3 
+                         py-2
+                         bg-slate-50"
+            />
+          </div>
+          <div className="col-span-full md:col-span-1">
             <label className="text-xs font-semibold text-slate-500">
               Versao
             </label>
             <input
+              type="number"
+              step="0.10"
+              min={0}            
               value={bomData.version}
               onKeyDown={(e) => {
                 if (e.key === "Enter") e.preventDefault();
@@ -1183,62 +1134,8 @@ export default function BomPage() {
               className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2"
             />
           </div>
-          <div>
-            <label className="text-xs font-semibold text-slate-500">
-              Lote padrao
-            </label>
-            <input
-              type="number"
-              min={1}
-              step={"0"}
-              value={bomData.lotSize}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") e.preventDefault();
-              }}
-              onChange={(event) =>
-                setBomData({ ...bomData, lotSize: Number(event.target.value) || 0})
-              }
-              onBlur={(event) => {
-                if (event.target.value === "") {
-                  setBomData((prev) => ({
-                    ...prev,
-                    lotSize: baseBom.lotSize,
-                  }));
-                }
-              }}
-              className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-semibold text-slate-500">
-              Margem alvo (R$)
-            </label>
-            <input
-              type="number"
-              min={0}
-              step="0.01"
-              value={bomData.marginTarget}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") e.preventDefault();
-              }}
-              onChange={(event) =>
-                setBomData({
-                  ...bomData,
-                  marginTarget: Number(event.target.value),
-                })
-              }
-              onBlur={(event) => {
-                if (event.target.value === "") {
-                  setBomData((prev) => ({
-                    ...prev,
-                    marginTarget: baseBom.marginTarget,
-                  }));
-                }
-              }}
-              className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2"
-            />
-          </div>
         </div>
+
         {/* TABELA (Tablet e Desktop) */}
         <div className="hidden md:block overflow-x-auto border border-slate-100 rounded-2xl">
           <table className="w-full text-sm">
@@ -1275,9 +1172,9 @@ export default function BomPage() {
                   <td className="px-4 py-2 w-48">
                     <input
                       type="number"
-                      min={0.0001}
+                      min={0}
                       step="0.0001"
-                      value={item.quantity}
+                      value={normalizeDecimal(item.quantity)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter") e.preventDefault();
                       }}
@@ -1291,15 +1188,15 @@ export default function BomPage() {
                           );
                         }
                       }}
-                      className="w-full border border-slate-200 rounded-xl px-3 py-2"
+                      className="w-full border border-slate-200 rounded-xl px-3 py-2 align-right"
                     />
                   </td>
                   <td className="px-4 py-2 w-48">
                     <input
                       type="number"
-                      step="0.0001"
+                      step="0.001"
                       min={0}
-                      value={item.unitCost}
+                      value={normalizeDecimal(item.unitCost)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter") e.preventDefault();
                       }}
@@ -1313,7 +1210,7 @@ export default function BomPage() {
                           );
                         }
                       }}
-                      className="w-full border border-slate-200 rounded-xl px-3 py-2"
+                      className="w-full border border-slate-200 rounded-xl px-3 py-2 align-right"
                     />
                   </td>
                   <td className="px-4 py-2 w-36">
@@ -1373,9 +1270,9 @@ export default function BomPage() {
                       quantityInputsRef.current[index] = el;
                     }}
                     type="number"
-                    min={0.0001}
+                    min={0.0}
                     step="0.0001"
-                    value={item.quantity}
+                    value={normalizeDecimal(item.quantity)}
                     onChange={(e) => updateItem(index, "quantity", e.target.value)}
                     onKeyDown={(event) => {
                       if (event.key === "Enter") {
@@ -1403,9 +1300,9 @@ export default function BomPage() {
                       unitCostInputsRef.current[index] = el;
                     }}
                     type="number"
-                    step="0.0001"
+                    step="0.001"
                     min={0}
-                    value={item.unitCost}
+                    value={normalizeDecimal(item.unitCost)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") e.preventDefault();
                     }}
@@ -1457,61 +1354,23 @@ export default function BomPage() {
       </SectionCard>
 
       <SectionCard
-        title="Resumo financeiro"
-        description="Distribuicao de custos diretos e margem"
+        title="Custo de Produção"
+        description=""
       >
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-          <div className="bg-slate-50 rounded-2xl p-4">
-            <p className="text-xs text-slate-500">Ingredientes</p>
-            <p className="text-lg font-semibold text-slate-900">
-              {formatCurrency(totals.ingredients)}
-            </p>
-          </div>
-          <div className="bg-slate-50 rounded-2xl p-4">
-            <p className="text-xs text-slate-500">Mao de obra</p>
-            <p className="text-lg font-semibold text-slate-900">
-              {formatCurrency(totals.labor)}
-            </p>
-          </div>
-          <div className="bg-slate-50 rounded-2xl p-4">
-            <p className="text-xs text-slate-500">Embalagem</p>
-            <p className="text-lg font-semibold text-slate-900">
-              {formatCurrency(totals.packaging)}
-            </p>
-          </div>
-          <div className="bg-slate-50 rounded-2xl p-4">
-            <p className="text-xs text-slate-500">Tributos</p>
-            <p className="text-lg font-semibold text-slate-900">
-              {formatCurrency(totals.taxes)}
-            </p>
-          </div>
-          <div className="bg-slate-50 rounded-2xl p-4">
-            <p className="text-xs text-slate-500">Overhead</p>
-            <p className="text-lg font-semibold text-slate-900">
-              {formatCurrency(totals.overhead)}
-            </p>
-          </div>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="border border-slate-200 rounded-2xl p-4">
-            <p className="text-xs text-slate-500">Custo total do lote</p>
-            <p className="text-2xl font-semibold text-slate-900">
-              {formatCurrency(totals.total)}
-            </p>
-          </div>
-          <div className="border border-slate-200 rounded-2xl p-4">
-            <p className="text-xs text-slate-500">Custo unitario</p>
-            <p className="text-2xl font-semibold text-slate-900">
+        <div className="grid grid-cols-3 md:grid-cols-3 gap-4 mb-6">
+         <div className="border border-slate-200 rounded-2xl p-4
+                         md:col-start-3
+                         col-span-3 
+                         md:col-span-1">
+
+            <p className="text-xs text-slate-500">Custo total unitário</p>
+            <p className="text-2xl font-semibold text-emerald-600 text-right">
               {formatCurrency(totals.unit)}
             </p>
           </div>
-          <div className="border border-slate-200 rounded-2xl p-4">
-            <p className="text-xs text-slate-500">Margem calculada</p>
-            <p className="text-2xl font-semibold text-emerald-600">
-              {totals.marginAchieved.toFixed(1)}%
-            </p>
-          </div>
         </div>
+          
+          
       </SectionCard>
 
       <SectionCard
@@ -1534,21 +1393,7 @@ export default function BomPage() {
                 </tr>
               </thead>
               <tbody>
-                {/* {boms.slice(0, 6).map((bom) => (
-                  <tr
-                    key={bom.id}
-                    className="border-t border-slate-100 hover:bg-slate-50"
-                  >
-                    <td className="px-4 py-2 font-semibold text-slate-900">
-                      {bom.productCode}
-                    </td>
-                    <td className="px-4 py-2">{bom.version}</td>
-                    <td className="px-4 py-2">{bom.lotSize}</td>
-                    <td className="px-4 py-2">{formatCurrency(bom.totalCost)}</td>
-                    <td className="px-4 py-2">{formatCurrency(bom.unitCost)}</td>
-                    <td className="px-4 py-2">{bom.marginAchieved}%</td>
-                  </tr>
-                ))} */}
+                
                 {boms.slice(0, 6).map((bom) => (
                 <tr key={bom.id} className="border-t border-slate-100 hover:bg-slate-50">
                   <td className="px-4 py-2 font-semibold text-slate-900">

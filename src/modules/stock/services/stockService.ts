@@ -5,7 +5,7 @@ import {
   InventoryMovementType,
   SessionData,
 } from "@/modules/core/types";
-import { USE_MOCK_API, sessionRequest } from "@/modules/core/services/apiClient";
+import { sessionRequest } from "@/modules/core/services/apiClient";
 
 type MovementFilters = {
   type: InventoryMovementType;
@@ -37,16 +37,7 @@ type MovementSummaryApiRecord = {
   currentBalance: number;
 };
 
-const movementStore: Record<string, InventoryMovementRecord[]> = {};
-
-const ensureStore = (tenant: string) => {
-  if (!movementStore[tenant]) {
-    movementStore[tenant] = [];
-  }
-  return movementStore[tenant];
-};
-
-let mockIdCounter = 1;
+let fallbackIdCounter = 1;
 
 const normalizeNumber = (value: unknown) => {
   if (value === undefined || value === null || value === "") {
@@ -74,7 +65,7 @@ const mapMovementFromApi = (
   record: MovementApiRecord,
 ): InventoryMovementRecord => {
   const id =
-    normalizeNumber(getValue(record, ["id", "nrlan"])) ?? mockIdCounter++;
+    normalizeNumber(getValue(record, ["id", "nrlan"])) ?? fallbackIdCounter++;
   const itemId =
     normalizeNumber(getValue(record, ["itemId", "cditem"])) ?? 0;
   const type =
@@ -122,91 +113,6 @@ const mapMovementToApiPayload = (payload: InventoryMovementPayload) => ({
   date: payload.date,
 });
 
-const delay = (ms = 200) => new Promise((resolve) => setTimeout(resolve, ms));
-
-const mockCreateMovement = async (
-  tenant: string,
-  payload: InventoryMovementPayload,
-) => {
-  await delay();
-  const entry: InventoryMovementRecord = {
-    id: mockIdCounter++,
-    itemId: payload.itemId,
-    type: payload.type,
-    date: payload.date ?? new Date().toISOString(),
-    quantity: payload.quantity,
-    unitPrice: payload.unitPrice,
-    totalValue:
-      payload.unitPrice !== undefined
-        ? payload.unitPrice * payload.quantity
-        : undefined,
-    previousBalance: ensureStore(tenant)[0]?.currentBalance ?? 0,
-    currentBalance:
-      (ensureStore(tenant)[0]?.currentBalance ?? 0) +
-      (payload.type === "E" ? payload.quantity : -payload.quantity),
-    notes: payload.notes,
-    document: payload.document,
-    counterparty: payload.customerOrSupplier
-      ? { code: payload.customerOrSupplier }
-      : undefined,
-  };
-  ensureStore(tenant).unshift(entry);
-  return entry;
-};
-
-const mockListMovements = async (
-  tenant: string,
-  filters?: MovementFilters,
-) => {
-  await delay();
-  let data = ensureStore(tenant);
-  if (filters?.type) {
-    data = data.filter((entry) => entry.type === filters.type);
-  }
-  if (filters?.itemId) {
-    data = data.filter((entry) => entry.itemId === filters.itemId);
-  }
-  return data;
-};
-
-const mockKardex = async (tenant: string, itemId: number) => {
-  await delay();
-  return ensureStore(tenant).filter((entry) => entry.itemId === itemId);
-};
-
-const mockSummary = async (
-  tenant: string,
-  filters: SummaryFilters,
-): Promise<InventoryMovementSummary> => {
-  await delay();
-  const movements = ensureStore(tenant).filter((entry) => {
-    const inItem =
-      filters.itemId === undefined || entry.itemId === filters.itemId;
-    return inItem;
-  });
-  const entries = movements.filter((m) => m.type === "E");
-  const exits = movements.filter((m) => m.type === "S");
-  const sumQuantity = (data: InventoryMovementRecord[]) =>
-    data.reduce((sum, item) => sum + item.quantity, 0);
-  const sumValue = (data: InventoryMovementRecord[]) =>
-    data.reduce((sum, item) => sum + (item.totalValue ?? 0), 0);
-  return {
-    itemId: filters.itemId,
-    from: filters.from,
-    to: filters.to,
-    entries: {
-      quantity: sumQuantity(entries),
-      value: sumValue(entries),
-    },
-    exits: {
-      quantity: sumQuantity(exits),
-      value: sumValue(exits),
-    },
-    netQuantity: sumQuantity(entries) - sumQuantity(exits),
-    currentBalance: ensureStore(tenant)[0]?.currentBalance ?? 0,
-  };
-};
-
 const buildQuery = (params?: Record<string, string | number | undefined>) => {
   const query = new URLSearchParams();
   if (!params) return "";
@@ -222,9 +128,6 @@ export async function createInventoryMovement(
   session: SessionData,
   payload: InventoryMovementPayload,
 ) {
-  if (USE_MOCK_API) {
-    return mockCreateMovement(session.tenant.slug, payload);
-  }
   const response = await sessionRequest<MovementApiRecord>(session, {
     path: "/inventory/movements",
     method: "POST",
@@ -237,9 +140,6 @@ export async function listInventoryMovements(
   session: SessionData,
   filters: MovementFilters,
 ) {
-  if (USE_MOCK_API) {
-    return mockListMovements(session.tenant.slug, filters);
-  }
   const query = buildQuery({
     type: filters.type,
     from: filters.from,
@@ -260,9 +160,6 @@ export async function getItemKardex(
   itemId: number,
   filters?: KardexFilters,
 ) {
-  if (USE_MOCK_API) {
-    return mockKardex(session.tenant.slug, itemId);
-  }
   const query = buildQuery({
     from: filters?.from,
     to: filters?.to,
@@ -280,9 +177,6 @@ export async function getMovementSummary(
   session: SessionData,
   filters: SummaryFilters,
 ) {
-  if (USE_MOCK_API) {
-    return mockSummary(session.tenant.slug, filters);
-  }
   const query = buildQuery({
     from: filters.from,
     to: filters.to,

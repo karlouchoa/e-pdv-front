@@ -7,8 +7,6 @@ export function middleware(req: NextRequest) {
   const baseHosts = [
     "goldpdv.com.br",
     "www.goldpdv.com.br",
-    "localhost:3000",
-    "localhost:3001",
   ];
 
   if (baseHosts.includes(hostname)) {
@@ -16,8 +14,6 @@ export function middleware(req: NextRequest) {
   }
 
   const currentHost = hostname
-    .replace(".localhost:3001", "") // desenvolvimento
-    .replace(".localhost:3000", "")
     .replace(".goldpdv.com.br", ""); // producao
 
   const tenantId = currentHost;

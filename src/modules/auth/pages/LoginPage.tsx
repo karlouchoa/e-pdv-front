@@ -24,6 +24,7 @@ export default function LoginPage() {
     event.preventDefault();
     setError(null);
     setIsLoading(true);
+
     try {
       const sessionData = await login({ login: loginField, senha });
       const redirected = redirectToTenantDomain(sessionData.tenant, {

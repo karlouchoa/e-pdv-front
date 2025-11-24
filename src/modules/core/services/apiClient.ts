@@ -1,16 +1,17 @@
+// apiClient.ts
+
 import type { SessionData } from "@/modules/core/types";
 import { SESSION_STORAGE_KEY } from "@/modules/core/constants/storage";
 
-const DEFAULT_API_URL =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3023";
+// A URL base para requisições não-tenant-aware (ex: login)
+const DEFAULT_API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3023";
 
+// Template para montar a URL com subdomínio de tenant (ex: https://{tenant}.goldpdv.com.br)
 const TENANT_DOMAIN_TEMPLATE =
   process.env.NEXT_PUBLIC_TENANT_DOMAIN_TEMPLATE ??
   "https://{tenant}.goldpdv.com.br";
+  
 const DEFAULT_TIMEOUT = Number(process.env.NEXT_PUBLIC_API_TIMEOUT ?? 15000);
-
-export const USE_MOCK_API =
-  process.env.NEXT_PUBLIC_USE_MOCK_API !== "false";
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -25,6 +26,9 @@ export interface ApiRequestConfig {
   timeoutMs?: number;
 }
 
+/**
+ * Faz uma requisição com as informações de tenant e token da sessão.
+ */
 export async function sessionRequest<T>(
   session: SessionData,
   config: Omit<ApiRequestConfig, "tenant" | "token">,
@@ -41,16 +45,21 @@ const ensureLeadingSlash = (path: string) =>
 
 const buildTenantUrl = (tenant: string, path: string) => {
   if (!tenant) {
-    throw new Error("Tenant obrigatorio para chamada tenant-aware.");
+    throw new Error("Tenant obrigatório para chamada tenant-aware.");
   }
 
+  // Verifica se o template usa a sintaxe {tenant} e substitui
   if (TENANT_DOMAIN_TEMPLATE.includes("{tenant}")) {
     return `${TENANT_DOMAIN_TEMPLATE.replace("{tenant}", tenant)}${path}`;
   }
 
+  // Caso contrário, assume que o template é apenas o domínio e monta o subdomínio
   return `https://${tenant}.${TENANT_DOMAIN_TEMPLATE}${path}`;
 };
 
+/**
+ * Função principal para realizar requisições à API.
+ */
 export async function apiRequest<T>({
   path,
   method = "GET",
@@ -62,18 +71,11 @@ export async function apiRequest<T>({
   timeoutMs = DEFAULT_TIMEOUT,
 }: ApiRequestConfig): Promise<T> {
   const normalizedPath = ensureLeadingSlash(path);
+  
+  // Constrói a URL: subdomínio do tenant OU URL base padrão
   const url = tenantAware
     ? buildTenantUrl(tenant ?? "", normalizedPath)
     : `${DEFAULT_API_URL}${normalizedPath}`;
-
-    // console.log("[apiRequest]", {
-    //   url,
-    //   method,
-    //   tenantAware,
-    //   tenant,
-    //   data,
-    // });
-    
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -87,7 +89,7 @@ export async function apiRequest<T>({
     } catch (err) {
       console.error("Erro ao limpar sessao:", err);
     }
-    window.alert("Sessao expirada. Faça login novamente.");
+    window.alert("Sessão expirada. Faça login novamente.");
     window.location.href = "/";
   };
 
@@ -130,12 +132,6 @@ export async function apiRequest<T>({
           : `Erro ${response.status} na API`,
       );
     }
-
-    console.info("[apiRequest][success]", {
-      url,
-      status: response.status,
-      body: responseBody,
-    });
 
     return (responseBody as T) ?? ({} as T);
   } finally {

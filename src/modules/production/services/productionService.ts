@@ -15,8 +15,11 @@ import {
 } from "@/modules/core/types";
 import { sessionRequest } from "@/modules/core/services/apiClient";
 import { calculateBomTotals } from "@/modules/production/utils/calc";
+import { api } from "@/modules/core/services/api";
 
 const FORMULAS_ENDPOINT = "/T_FORMULAS";
+const LAST_BOM_VERSION_ENDPOINT = "production/bom/product/";
+
 const DEBUG_API =
   process.env.NEXT_PUBLIC_DEBUG_API?.toLowerCase() === "true";
 
@@ -393,23 +396,34 @@ const mapRawMaterialToApiPayload = (
 // }
 
 // productionService.ts
+
+
+export interface BomResponse {
+  id: string;
+  product_code: string;
+  version: string;
+  lot_size: number | string;
+  validity_days: number;
+  margin_target: number | string;
+  margin_achieved: number | string;
+  total_cost: number | string;
+  unit_cost: number | string;
+  notes?: string | null;
+  items: any[];
+}
+
 export async function listProductFormulas(
   session: SessionData,
   productCode: string,
-) {
-  if (!productCode) {
-    return [];
-  }
+): Promise<BomResponse | null> {
+  if (!productCode) return null;
 
-  // Mesmo padrão do GET em T_ITENS
-  return sessionRequest<any[]>(session, {
-    path: buildQueryPath(FORMULAS_ENDPOINT, {
-      tabela: "T_FORMULAS",
-      cditem: productCode,
-    }),
+  return sessionRequest<BomResponse>(session, {
+    path: buildQueryPath(LAST_BOM_VERSION_ENDPOINT + productCode),
     method: "GET",
   });
 }
+
 
 
 export async function listBoms(session: SessionData) {

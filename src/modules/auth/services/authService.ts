@@ -1,8 +1,7 @@
+import { api } from "@/modules/core/services/api";
 import { LoginPayload, SessionData, TenantInfo } from "@/modules/core/types";
-import { apiRequest } from "@/modules/core/services/apiClient";
 
-const AUTH_PATH =
-  process.env.NEXT_PUBLIC_AUTH_PATH?.trim() || "/auth/login";
+const AUTH_PATH = process.env.NEXT_PUBLIC_AUTH_PATH?.trim() || "/auth/login";
 
 type AuthApiResponse = {
   token: string;
@@ -47,7 +46,8 @@ const buildTenantInfo = (response: AuthApiResponse): TenantInfo => {
       `https://placehold.co/160x50?text=${encodeURIComponent(
         response.empresa ?? slugLabel,
       )}`,
-    domain: `${domainSlug}.goldpdv.com.br`,
+    // domain: `${domainSlug}.goldpdv.com.br`,
+    domain: `${domainSlug}`,
     enterprise: response.empresa ?? slugLabel.toUpperCase(),
   };
 };
@@ -80,12 +80,24 @@ const mapApiToSession = (response: AuthApiResponse): SessionData => {
 };
 
 export async function authenticate(payload: LoginPayload): Promise<SessionData> {
-  const response = await apiRequest<AuthApiResponse>({
-    path: AUTH_PATH,
-    method: "POST",
-    data: payload,
-    tenantAware: false,
-  });
+  try {
+    const { data, status } = await api.post<AuthApiResponse>(AUTH_PATH, payload, {
+      // Evita que 4xx (ex: 401 de credenciais invalidas) acionem o interceptor global
+      validateStatus: (code) => code < 500,
+    });
 
-  return mapApiToSession(response);
+    if (status >= 400) {
+      const message =
+        (typeof data?.mensagem === "string" && data.mensagem.trim()) ||
+        "Falha ao autenticar";
+      throw new Error(message);
+    }
+
+    return mapApiToSession(data);
+  } catch (error) {
+    if (error instanceof Error) {
+      throw error;
+    }
+    throw new Error("Falha ao autenticar");
+  }
 }
