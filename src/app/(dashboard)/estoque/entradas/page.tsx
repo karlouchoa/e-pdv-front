@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useCallback, useMemo, useState } from "react";
 import { useSession } from "@/modules/core/hooks/useSession";
 import { SectionCard } from "@/modules/core/components/SectionCard";
 import { formatCurrency, formatDate } from "@/modules/core/utils/formatters";
@@ -9,13 +9,97 @@ import {
   InventoryMovementRecord,
   InventoryMovementSummary,
   InventoryMovementType,
+  ProductPayload,
+  Category
 } from "@/modules/core/types";
+
 import {
   createInventoryMovement,
   getItemKardex,
   getMovementSummary,
   listInventoryMovements,
 } from "@/modules/stock/services/stockService";
+import { api } from "@/modules/core/services/api";
+
+type ItemRecord = ProductPayload & {
+  id: string;
+  createdAt?: string;
+  updatedAt?: string;
+  isComposed: boolean;
+  isRawMaterial: boolean;
+  notes?: string;
+  imagePath?: string;
+};
+
+type ItemFormState = ProductPayload & {
+  id: string | null;
+  isComposed: boolean;
+  isRawMaterial: boolean;
+  notes: string;
+  imagePath: string;
+};
+
+type AnyRecord = Record<string, unknown>;
+
+const toRecord = (value: unknown): AnyRecord => (value ?? {}) as AnyRecord;
+
+const emptyForm: ItemFormState = {
+  id: null,
+  sku: "",
+  name: "",
+  unit: "UN",
+  category: "",
+  salePrice: 0,
+  costPrice: 0,
+  leadTimeDays: 7,
+  type: "acabado",
+  description: "",
+  ncm: "",
+  cest: "",
+  cst: "",
+  barcode: "",
+  isComposed: false,
+  isRawMaterial: false,
+  notes: "",
+  imagePath: "",
+};
+
+const documentTypesEntrada = [
+  { label: "Compra", value: "C" },
+  { label: "Cancelamento de venda", value: "D" },
+  { label: "Ajuste de Inventário", value: "I" },
+  { label: "Troca", value: "T" },
+  { label: "Fabricação", value: "F" },
+];
+
+const documentTypesSaida = [
+  { label: "Venda", value: "V" },
+  { label: "Troca", value: "T" },
+  { label: "Consumo", value: "C" },
+  { label: "Devolução de Compra", value: "D" },
+  { label: "Produção", value: "P" },
+  { label: "Ajuste de Inventário", value: "I" },
+];
+
+type ClienteRecord = {
+  id: string;
+  code: string;   // CDCLI
+  name: string;   // DECLI
+};
+
+type FornecedorRecord = {
+  id: string;
+  code: string;   // CDFOR
+  name: string;   // DEFOR
+};
+
+type EmpresaRecord = {
+  id: string;
+  code: string;   // CDEMP
+  name: string;   // APELIDO
+};
+
+
 
 const today = new Date().toISOString().slice(0, 10);
 const startOfMonth = new Date(
@@ -28,8 +112,9 @@ const startOfMonth = new Date(
 
 const movementFormDefaults = {
   itemId: "",
+  itemSku:"",
   type: "E" as InventoryMovementType,
-  quantity: "",
+  quantity: "1",
   unitPrice: "",
   documentNumber: "",
   documentDate: today,
@@ -39,6 +124,19 @@ const movementFormDefaults = {
   counterparty: "",
   date: today,
 };
+
+const candidateKeys = [
+  "data",
+  "items",
+  "result",
+  "rows",
+  "lista",
+  "records",
+  "content",
+  "values",
+  "itens",
+  "produtos",
+];
 
 const movementFilterDefaults = {
   type: "E" as InventoryMovementType,
@@ -65,16 +163,146 @@ const parseNumber = (value: string) => {
   return Number.isFinite(parsed) ? parsed : undefined;
 };
 
+const resolveKeyVariants = (key: string) => {
+  const base = key.trim();
+  const variants = new Set<string>([
+    base,
+    base.toLowerCase(),
+    base.toUpperCase(),
+    base.replace(/_/g, ""),
+    base.toLowerCase().replace(/_/g, ""),
+  ]);
+  return Array.from(variants);
+};
+
+const getValue = (record: AnyRecord, key: string) => {
+  const variants = resolveKeyVariants(key);
+  for (const variant of variants) {
+    if (Object.prototype.hasOwnProperty.call(record, variant)) {
+      return record[variant];
+    }
+  }
+  return undefined;
+};
+
+const getNumberValue = (
+  record: AnyRecord,
+  keys: string[],
+  fallback = 0,
+) => {
+  for (const key of keys) {
+    const value = getValue(record, key);
+    if (value !== undefined && value !== null && value !== "") {
+      const parsed = Number(value);
+      if (!Number.isNaN(parsed)) {
+        return parsed;
+      }
+    }
+  }
+  return fallback;
+};
+
 const parsePositiveNumber = (value: string) => {
   const parsed = parseNumber(value);
   if (parsed === undefined || parsed <= 0) return undefined;
   return parsed;
 };
 
+const stripDiacritics = (value: string) =>
+  value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+const normalizeQuery = (value: string) =>
+  stripDiacritics(value).toLowerCase();
+
+const matchItemQuery = (item: ItemRecord, query: string) => {
+  const normalizedQuery = normalizeQuery(query.trim());
+  if (!normalizedQuery) return false;
+  const name = normalizeQuery(item.name);
+  const sku = normalizeQuery(item.sku);
+  const barcode = normalizeQuery(item.barcode ?? "");
+  return (
+    name.includes(normalizedQuery) ||
+    sku.startsWith(normalizedQuery) ||
+    barcode.startsWith(normalizedQuery)
+  );
+};
+
+const findArrayDeep = (value: unknown, depth = 0): AnyRecord[] | null => {
+  if (depth > 5) return null;
+  if (Array.isArray(value)) {
+    return value as AnyRecord[];
+  }
+  if (value && typeof value === "object") {
+    const record = value as AnyRecord;
+    for (const key of candidateKeys) {
+      if (record[key] !== undefined) {
+        const candidate = findArrayDeep(record[key], depth + 1);
+        if (candidate) return candidate;
+      }
+    }
+    for (const nested of Object.values(record)) {
+      const candidate = findArrayDeep(nested, depth + 1);
+      if (candidate) return candidate;
+    }
+  }
+  return null;
+};
+
+const extractArray = <T,>(value: unknown): T[] => {
+  const result = findArrayDeep(value);
+  return Array.isArray(result) ? (result as T[]) : [];
+};
+
+const getStringValue = (
+  record: AnyRecord,
+  keys: string[],
+  fallback = "",
+) => {
+  for (const key of keys) {
+    const value = getValue(record, key);
+    if (value !== undefined && value !== null && `${value}`.trim() !== "") {
+      return String(value);
+    }
+  }
+  return fallback;
+};
+
+
+const normalizeCliente = (raw: AnyRecord): ClienteRecord => {
+  const record = toRecord(raw);
+  return {
+    id: getStringValue(record, ["id", "ID"], ""),
+    code: getStringValue(record, ["cdcli", "CDCLI"], ""),
+    name: getStringValue(record, ["decli", "DECLI"], ""),
+  };
+};
+
+const normalizeFornecedor = (raw: AnyRecord): FornecedorRecord => {
+  const record = toRecord(raw);
+  return {
+    id: getStringValue(record, ["id", "ID"], ""),
+    code: getStringValue(record, ["cdfor", "CDFOR"], ""),
+    name: getStringValue(record, ["defor", "DEFOR"], ""),
+  };
+};
+
+const normalizeEmpresa = (raw: AnyRecord): EmpresaRecord => {
+  const record = toRecord(raw);
+  return {
+    id: getStringValue(record, ["id", "ID"], ""),
+    code: getStringValue(record, ["cdemp", "CDEMP"], ""),
+    name: getStringValue(record, ["apelido", "APELIDO"], ""),
+  };
+};
+
+
 export default function StockMovementsPage() {
   const { session } = useSession();
   const [movementForm, setMovementForm] = useState(movementFormDefaults);
   const [movementMessage, setMovementMessage] = useState<string | null>(null);
+
 
   const [movements, setMovements] = useState<InventoryMovementRecord[]>([]);
   const [movementsLoading, setMovementsLoading] = useState(false);
@@ -101,130 +329,351 @@ export default function StockMovementsPage() {
   const [kardexLoading, setKardexLoading] = useState(false);
   const [kardexError, setKardexError] = useState<string | null>(null);
 
-  const handleMovementSubmit = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!session) return;
-    const itemId = parsePositiveNumber(movementForm.itemId);
-    const quantity = parsePositiveNumber(movementForm.quantity);
-    if (!itemId || !quantity) {
-      setMovementMessage("Informe item e quantidade válidos.");
-      return;
-    }
-    const payload: InventoryMovementPayload = {
-      itemId,
-      type: movementForm.type,
-      quantity,
-      unitPrice: parsePositiveNumber(movementForm.unitPrice ?? ""),
-      document:
-        movementForm.documentNumber ||
-        movementForm.documentDate ||
-        movementForm.documentType
-          ? {
-              number: parseNumber(movementForm.documentNumber),
-              date: movementForm.documentDate || undefined,
-              type: movementForm.documentType || undefined,
-            }
-          : undefined,
-      notes: movementForm.notes || undefined,
-      warehouse: parseNumber(movementForm.warehouse),
-      customerOrSupplier: parseNumber(movementForm.counterparty),
-      date: movementForm.date || undefined,
+  const [searchTerm, setSearchTerm] = useState("");
+  const [showSearchResults, setShowSearchResults] = useState(false);
+  const [items, setItems] = useState<ItemRecord[]>([]);
+  const [form, setForm] = useState<ItemFormState>(emptyForm);
+  const [loading, setLoading] = useState(true);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [feedback, setFeedback] = useState<string | null>(null);
+  const [highlightIndex, setHighlightIndex] = useState(-1);
+  const [clientes, setClientes] = useState<ClienteRecord[]>([]);
+  const [fornecedores, setFornecedores] = useState<FornecedorRecord[]>([]);
+  const [empresas, setEmpresas] = useState<EmpresaRecord[]>([]);
+
+  const [counterpartySearch, setCounterpartySearch] = useState("");
+  const [counterpartyResults, setCounterpartyResults] = useState<any[]>([]);
+  const [showCounterpartyResults, setShowCounterpartyResults] = useState(false);
+  const [counterpartyHighlightIndex, setCounterpartyHighlightIndex] = useState(-1);
+
+  const [warehouseSearch, setWarehouseSearch] = useState("");
+  const [warehouseResults, setWarehouseResults] = useState<EmpresaRecord[]>([]);
+  const [showWarehouseResults, setShowWarehouseResults] = useState(false);
+  const [warehouseHighlightIndex, setWarehouseHighlightIndex] = useState(-1);
+
+
+  const documentTypeOptions =
+  movementForm.type === "E"
+    ? documentTypesEntrada
+    : documentTypesSaida;
+
+  const normalizeItemFromApi = (
+    raw: AnyRecord,
+    fallbackId: string
+  ): ItemRecord => {
+    const record = toRecord(raw);
+  
+    const id =
+      getStringValue(record, ["id", "ID"], "") ||
+      getStringValue(record, ["guid", "Guid", "uuid"], "") ||
+      fallbackId;
+  
+    const rawItProdsn = getStringValue(record, ["itprodsn", "ITPRODSN"], "")
+      .replace(/\s+/g, "")
+      .toUpperCase();
+  
+    const rawMatprima = getStringValue(record, ["matprima", "MATPRIMA"], "")
+      .replace(/\s+/g, "")
+      .toUpperCase();
+  
+    const isComposed = rawItProdsn === "S";
+    const isRawMaterial = rawMatprima === "S";
+  
+    return {
+      id,
+      sku: getStringValue(record, ["sku", "code", "cditem", "CDITEM"], ""),
+      name: getStringValue(record, ["name", "deitem", "defat"], ""),
+      unit: getStringValue(record, ["unit", "unid", "undven"], "UN"),
+  
+      // removido: category
+      category: "",
+  
+      salePrice: getNumberValue(record, ["salePrice", "preco", "preco"], 0),
+      costPrice: getNumberValue(record, ["costPrice", "custo", "custlq"], 0),
+      leadTimeDays: getNumberValue(record, ["leadTimeDays", "leadtime"], 0),
+  
+      type: "acabado",
+  
+      description: getStringValue(record, ["description", "obsitem"], ""),
+      notes: getStringValue(record, ["obsitem", "notes"], ""),
+      imagePath: getStringValue(record, ["locfotitem", "imagePath"], ""),
+      ncm: getStringValue(record, ["ncm", "clasfis", "codncm"], ""),
+      cest: getStringValue(record, ["cest"], ""),
+      cst: getStringValue(record, ["cst", "codcst"], ""),
+      barcode: getStringValue(record, ["barcode", "barcodeit"], ""),
+      createdAt: getStringValue(record, ["createdAt", "createdat", "datacadit"]),
+  
+      isComposed,
+      isRawMaterial,
     };
-    setMovementMessage(null);
-    try {
-      const created = await createInventoryMovement(session, payload);
-      setMovementMessage("Movimento registrado com sucesso.");
-      setMovementForm(movementFormDefaults);
-      setMovements((prev) => [created, ...prev]);
-    } catch (error) {
-      setMovementMessage(
-        error instanceof Error ? error.message : "Falha ao registrar movimento.",
-      );
-    }
   };
+  
 
-  useEffect(() => {
-    if (!session) return;
-    const fetchMovements = async () => {
-      setMovementsLoading(true);
-      setMovementsError(null);
+  const loadData = useCallback(async () => {
+      if (!session) return;
+      setLoading(true);
       try {
-        const parsedFilters = {
-          type: appliedMovementFilters.type,
-          from: appliedMovementFilters.from || undefined,
-          to: appliedMovementFilters.to || undefined,
-          itemId: parseNumber(appliedMovementFilters.itemId),
-        };
-        const response = await listInventoryMovements(session, parsedFilters);
-        setMovements(response);
+        const [itemsResponse,fornecedoresResponse,
+               clientesResponse,  empresasResponse,
+              ] = await Promise.all([
+          api.get("/T_ITENS", { params: { tabela: "T_ITENS" } }),
+          api.get("/T_FOR"),
+          api.get("/T_CLI"),
+          api.get("/T_EMP"),
+        ]);
+        
+        console.log("Resposta itens:", itemsResponse.data);
+  
+        // ITENS
+        const rawItems = extractArray<AnyRecord>(itemsResponse.data);
+        const normalizedItems = rawItems.map((item, index) =>
+          normalizeItemFromApi(item, `item-${index}`),
+        );
+
+        setItems(normalizedItems);
+
+        // CLIENTES
+        const rawClientes = extractArray<AnyRecord>(clientesResponse.data);
+        setClientes(rawClientes.map(normalizeCliente));
+
+        // FORNECEDORES
+        const rawFornecedores = extractArray<AnyRecord>(fornecedoresResponse.data);
+        setFornecedores(rawFornecedores.map(normalizeFornecedor));
+
+        // EMPRESAS
+        const rawEmpresas = extractArray<EmpresaRecord>(empresasResponse.data);
+        const normalizedEmpresas = rawEmpresas.map((item, index) =>
+          normalizeEmpresa(item),
+        );
+        //setEmpresas(rawEmpresas.map(normalizeEmpresa));
+        setEmpresas(normalizedEmpresas);
+        
+        console.log("Empresas carregadas:", empresasResponse.data);
+        console.log("Empresas carregadas:", rawEmpresas);
+
       } catch (error) {
-        setMovementsError(
+        console.error("Falha ao carregar cadastros", error);
+        setFeedback(
           error instanceof Error
             ? error.message
-            : "Falha ao carregar movimentos.",
+            : "Falha ao carregar cadastros.",
         );
       } finally {
-        setMovementsLoading(false);
+        setLoading(false);
       }
-    };
-    fetchMovements();
-  }, [session, appliedMovementFilters]);
+    }, [session]);
+  
+    useEffect(() => {
+      loadData();
+    }, [loadData]);
 
-  useEffect(() => {
-    if (!session) return;
-    const fetchSummary = async () => {
-      setSummaryLoading(true);
-      setSummaryError(null);
+       
+
+    const searchResults = useMemo(() => {
+      if (!searchTerm.trim()) return [];
+      return items
+        .filter((item) => matchItemQuery(item, searchTerm))
+        .slice(0, 10);
+    }, [items, searchTerm]);
+
+    const handleSelectItem = (item: ItemRecord) => {
+      setMovementForm((prev) => ({
+        ...prev,
+        itemId: item.id,
+        itemSku: item.sku,                        // Preenche CDITEM
+        unitPrice: item.costPrice.toString(),     // Preenche preço unitário
+      }));
+    
+      setSearchTerm(item.name);
+      setShowSearchResults(false);
+    };
+    
+  
+    const handleSelectCounterparty = (item: any) => {
+      setMovementForm((prev) => ({
+        ...prev,
+        counterparty: item.code, // grava CDCLI ou CDFOR
+      }));
+    
+      setCounterpartySearch(`${item.code} - ${item.name}`);
+      setShowCounterpartyResults(false);
+      setCounterpartyHighlightIndex(-1);
+    };
+
+    const handleSelectWarehouse = (item: EmpresaRecord) => {~
+      console.log("WAREHOUSE SELECIONADO:", item);
+      setMovementForm((prev) => ({
+        ...prev,
+        warehouse: item.id, 
+      }));
+      console.log("Empresa do Payload:", movementForm.warehouse);  
+      setWarehouseSearch(`${item.code} - ${item.name}`);
+      setShowWarehouseResults(false);
+      setWarehouseHighlightIndex(-1);
+    };
+    
+      
+    
+    const handleMovementSubmit = async (event: FormEvent<HTMLFormElement>) => {
+      event.preventDefault();
+      if (!session) return;
+      const itemId = movementForm.itemId?.trim();
+      const quantity = parsePositiveNumber(movementForm.quantity);
+      if (!itemId || !quantity || quantity <= 0) {
+        setMovementMessage("Informe item e quantidade válidos.");
+        return;
+      }
+      const payload: InventoryMovementPayload = {
+        itemId,
+        type: movementForm.type,
+        quantity,
+        unitPrice: parsePositiveNumber(movementForm.unitPrice ?? ""),
+        document:
+          movementForm.documentNumber ||
+          movementForm.documentDate ||
+          movementForm.documentType
+            ? {
+                number: parseNumber(movementForm.documentNumber),
+                date: movementForm.documentDate || undefined,
+                type: movementForm.documentType || undefined,
+              }
+            : undefined,
+        notes: movementForm.notes || undefined,
+        warehouse: movementForm.warehouse,
+        customerOrSupplier: parseNumber(movementForm.counterparty),
+        date: movementForm.date || undefined,
+      };
+      setMovementMessage(null);
       try {
-        const response = await getMovementSummary(session, {
-          from: appliedSummaryFilters.from,
-          to: appliedSummaryFilters.to,
-          itemId: parseNumber(appliedSummaryFilters.itemId),
-        });
-        setSummary(response);
+        const created = await createInventoryMovement(session, payload);
+        setMovementMessage("Movimento registrado com sucesso.");
+        setMovementForm(movementFormDefaults);
+        setMovements((prev) => [created, ...prev]);
       } catch (error) {
-        setSummary(null);
-        setSummaryError(
-          error instanceof Error
-            ? error.message
-            : "Falha ao carregar resumo.",
+        setMovementMessage(
+          error instanceof Error ? error.message : "Falha ao registrar movimento.",
         );
-      } finally {
-        setSummaryLoading(false);
       }
     };
-    fetchSummary();
-  }, [session, appliedSummaryFilters]);
 
-  useEffect(() => {
-    if (!session) return;
-    const itemId = parseNumber(appliedKardexFilters.itemId);
-    if (!itemId) {
-      setKardex([]);
-      return;
-    }
-    const fetchKardex = async () => {
-      setKardexLoading(true);
-      setKardexError(null);
-      try {
-        const response = await getItemKardex(session, itemId, {
-          from: appliedKardexFilters.from || undefined,
-          to: appliedKardexFilters.to || undefined,
-        });
-        setKardex(response);
-      } catch (error) {
+    useEffect(() => {
+      if (!warehouseSearch.trim()) {
+        setWarehouseResults([]);
+        return;
+      }
+    
+      const term = warehouseSearch.toLowerCase();
+    
+      const filtered = empresas.filter((emp) =>
+        emp.name.toLowerCase().includes(term) ||
+        emp.code.toLowerCase().includes(term)
+      );
+    
+      setWarehouseResults(filtered);
+    }, [warehouseSearch, empresas]);
+    
+
+    useEffect(() => {
+      if (!session) return;
+      const fetchMovements = async () => {
+        setMovementsLoading(true);
+        setMovementsError(null);
+        try {
+          const parsedFilters = {
+            type: appliedMovementFilters.type,
+            from: appliedMovementFilters.from || undefined,
+            to: appliedMovementFilters.to || undefined,
+            itemId: parseNumber(appliedMovementFilters.itemId),
+          };
+          const response = await listInventoryMovements(session, parsedFilters);
+          setMovements(response);
+        } catch (error) {
+          setMovementsError(
+            error instanceof Error
+              ? error.message
+              : "Falha ao carregar movimentos.",
+          );
+        } finally {
+          setMovementsLoading(false);
+        }
+      };
+      fetchMovements();
+    }, [session, appliedMovementFilters]);
+
+    useEffect(() => {
+      if (!session) return;
+      const fetchSummary = async () => {
+        setSummaryLoading(true);
+        setSummaryError(null);
+        try {
+          const response = await getMovementSummary(session, {
+            from: appliedSummaryFilters.from,
+            to: appliedSummaryFilters.to,
+            itemId: parseNumber(appliedSummaryFilters.itemId),
+          });
+          setSummary(response);
+        } catch (error) {
+          setSummary(null);
+          setSummaryError(
+            error instanceof Error
+              ? error.message
+              : "Falha ao carregar resumo.",
+          );
+        } finally {
+          setSummaryLoading(false);
+        }
+      };
+      fetchSummary();
+    }, [session, appliedSummaryFilters]);
+
+    useEffect(() => {
+      if (!session) return;
+      const itemId = parseNumber(appliedKardexFilters.itemId);
+      if (!itemId) {
         setKardex([]);
-        setKardexError(
-          error instanceof Error
-            ? error.message
-            : "Falha ao carregar kardex.",
-        );
-      } finally {
-        setKardexLoading(false);
+        return;
       }
-    };
-    fetchKardex();
-  }, [session, appliedKardexFilters]);
+      const fetchKardex = async () => {
+        setKardexLoading(true);
+        setKardexError(null);
+        try {
+          const response = await getItemKardex(session, itemId, {
+            from: appliedKardexFilters.from || undefined,
+            to: appliedKardexFilters.to || undefined,
+          });
+          setKardex(response);
+        } catch (error) {
+          setKardex([]);
+          setKardexError(
+            error instanceof Error
+              ? error.message
+              : "Falha ao carregar kardex.",
+          );
+        } finally {
+          setKardexLoading(false);
+        }
+      };
+      fetchKardex();
+    }, [session, appliedKardexFilters]);
+
+    useEffect(() => {
+      if (!counterpartySearch.trim()) {
+        setCounterpartyResults([]);
+        return;
+      }
+  
+    const source =
+      movementForm.type === "E" ? fornecedores : clientes;
+  
+    const term = counterpartySearch.toLowerCase();
+  
+    const filtered = source.filter((x) =>
+      x.name.toLowerCase().includes(term) ||
+      x.code.toLowerCase().includes(term)
+    );
+  
+    setCounterpartyResults(filtered);
+  }, [counterpartySearch, movementForm.type, clientes, fornecedores]);
 
   const totalEntries = useMemo(() => {
     const entries = movements.filter((movement) => movement.type === "E");
@@ -247,22 +696,99 @@ export default function StockMovementsPage() {
 
       <SectionCard
         title="Registrar movimento"
-        description="Lançamento direto na tabela t_movest"
+        description="Lançamento direto na tabela de movimentações de estoque"
       >
+        <div>
+            <label className="text-xs font-semibold text-slate-500">
+              Localizar item existente
+            </label>
+
+            <input
+              value={searchTerm}
+              onFocus={() => searchTerm.trim() && setShowSearchResults(true)}
+              onChange={(event) => {
+                setSearchTerm(event.target.value);
+                setShowSearchResults(true);
+                setHighlightIndex(-1);
+              }}
+              onKeyDown={(event) => {
+                if (!showSearchResults || searchResults.length === 0) return;
+
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  setHighlightIndex((prev) =>
+                    prev < searchResults.length - 1 ? prev + 1 : prev
+                  );
+                }
+
+                if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  setHighlightIndex((prev) => (prev > 0 ? prev - 1 : prev));
+                }
+
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  if (highlightIndex >= 0) {
+                    handleSelectItem(searchResults[highlightIndex]);
+                    setHighlightIndex(-1);
+                  }
+                }
+              }}
+              placeholder="Digite parte do nome, código ou código de barras"
+              className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-2"
+            />
+
+            {searchTerm.trim() && showSearchResults ? (
+              <div className="relative mt-2">
+                {searchResults.length > 0 ? (
+                  <div className="absolute z-10 max-h-64 w-full divide-y divide-slate-100 overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-lg">
+                    {searchResults.map((item, index) => (
+                      <button
+                        type="button"
+                        key={item.id}
+                        onClick={() => {
+                          handleSelectItem(item);
+                          setHighlightIndex(-1);
+                        }}
+                        className={`w-full px-4 py-3 text-left 
+                          ${index === highlightIndex ? "bg-blue-100" : "bg-white"}
+                          hover:bg-blue-50 focus:bg-blue-50`}
+                      >
+                        <p className="text-sm font-semibold text-slate-900">
+                          {item.name}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          SKU: {item.sku}
+                          {item.barcode ? ` • Barras: ${item.barcode}` : ""}
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500">
+                    Nenhum item encontrado com os filtros informados.
+                  </p>
+                )}
+              </div>
+            ) : null}
+        </div>
+  
+
         <form
           className="grid grid-cols-1 md:grid-cols-3 gap-4"
           onSubmit={handleMovementSubmit}
         >
           <div>
             <label className="text-xs font-semibold text-slate-500">
-              Item (ID)
+              Item
             </label>
             <input
-              value={movementForm.itemId}
+              value={movementForm.itemSku}
               onChange={(event) =>
-                setMovementForm({ ...movementForm, itemId: event.target.value })
+                setMovementForm({ ...movementForm, itemSku: event.target.value })
               }
               required
+              readOnly
               className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2"
             />
           </div>
@@ -369,48 +895,185 @@ export default function StockMovementsPage() {
             <label className="text-xs font-semibold text-slate-500">
               Tipo documento
             </label>
-            <input
+            <select
               value={movementForm.documentType}
               onChange={(event) =>
                 setMovementForm({
                   ...movementForm,
-                  documentType: event.target.value,
+                  documentType: event.target.value, // salva o código C/D/I/T/F/P/V
                 })
               }
               className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2"
-            />
+            >
+              <option value="">Selecione...</option>
+
+              {documentTypeOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="text-xs font-semibold text-slate-500">
-              Almoxarifado (empitem)
+              Empresa / Almoxarifado
             </label>
+
             <input
-              value={movementForm.warehouse}
-              onChange={(event) =>
-                setMovementForm({
-                  ...movementForm,
-                  warehouse: event.target.value,
-                })
+              value={warehouseSearch}
+              onFocus={() =>
+                warehouseSearch.trim() && setShowWarehouseResults(true)
               }
-              className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2"
+              onChange={(event) => {
+                setWarehouseSearch(event.target.value);
+                setShowWarehouseResults(true);
+                setWarehouseHighlightIndex(-1);
+              }}
+              onKeyDown={(event) => {
+                if (!showWarehouseResults || warehouseResults.length === 0) return;
+
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  setWarehouseHighlightIndex((prev) =>
+                    prev < warehouseResults.length - 1 ? prev + 1 : prev
+                  );
+                }
+
+                if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  setWarehouseHighlightIndex((prev) =>
+                    prev > 0 ? prev - 1 : prev
+                  );
+                }
+
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  if (warehouseHighlightIndex >= 0) {
+                    handleSelectWarehouse(
+                      warehouseResults[warehouseHighlightIndex]
+                    );
+                  }
+                }
+              }}
+              placeholder="Localizar empresa..."
+              className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-2"
             />
+
+
+            {warehouseSearch.trim() && showWarehouseResults ? (
+              <div className="relative mt-2">
+                {warehouseResults.length > 0 ? (
+                  <div className="absolute z-10 max-h-64 w-full divide-y divide-slate-100 overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-lg">
+                    {warehouseResults.map((item, index) => (
+                      <button
+                        type="button"
+                        key={`emp-${item.id}-${index}`}
+                        onClick={() => handleSelectWarehouse(item)}
+                        className={`w-full px-4 py-3 text-left 
+                          ${
+                            index === warehouseHighlightIndex
+                              ? "bg-blue-100"
+                              : "bg-white"
+                          }
+                          hover:bg-blue-50 focus:bg-blue-50`}
+                      >
+                        <p className="text-sm font-semibold text-slate-900">
+                          {item.code} — {item.name}
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500">Nenhuma empresa encontrada.</p>
+                )}
+              </div>
+            ) : null}
           </div>
-          <div>
+
+          <div className="col-span-1 md:col-span-3 relative">
             <label className="text-xs font-semibold text-slate-500">
-              Cliente/Fornecedor (clifor)
+              {movementForm.type === "E" ? "Fornecedor" : "Cliente"}
             </label>
+
             <input
-              value={movementForm.counterparty}
-              onChange={(event) =>
-                setMovementForm({
-                  ...movementForm,
-                  counterparty: event.target.value,
-                })
+              value={counterpartySearch}
+              onFocus={() =>
+                counterpartySearch.trim() && setShowCounterpartyResults(true)
               }
-              className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2"
+              onChange={(event) => {
+                setCounterpartySearch(event.target.value);
+                setShowCounterpartyResults(true);
+                setCounterpartyHighlightIndex(-1);
+              }}
+              onKeyDown={(event) => {
+                if (!showCounterpartyResults || counterpartyResults.length === 0)
+                  return;
+
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  setCounterpartyHighlightIndex((prev) =>
+                    prev < counterpartyResults.length - 1 ? prev + 1 : prev
+                  );
+                }
+
+                if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  setCounterpartyHighlightIndex((prev) =>
+                    prev > 0 ? prev - 1 : prev
+                  );
+                }
+
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  if (counterpartyHighlightIndex >= 0) {
+                    handleSelectCounterparty(
+                      counterpartyResults[counterpartyHighlightIndex]
+                    );
+                  }
+                }
+              }}
+              placeholder={
+                movementForm.type === "E"
+                  ? "Localizar fornecedor..."
+                  : "Localizar cliente..."
+              }
+              className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-2"
             />
+
+            {counterpartySearch.trim() && showCounterpartyResults ? (
+              <div className="relative mt-2">
+                {counterpartyResults.length > 0 ? (
+                  <div className="absolute z-10 max-h-64 w-full divide-y divide-slate-100 overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-lg">
+                    {counterpartyResults.map((item, index) => (
+                      <button
+                        type="button"
+                        key={item.id}
+                        onClick={() => handleSelectCounterparty(item)}
+                        className={`w-full px-4 py-3 text-left
+                          ${
+                            index === counterpartyHighlightIndex
+                              ? "bg-blue-100"
+                              : "bg-white"
+                          }
+                          hover:bg-blue-50 focus:bg-blue-50`}
+                      >
+                        <p className="text-sm font-semibold text-slate-900">
+                          {item.code} — {item.name}
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500">
+                    Nenhum registro encontrado.
+                  </p>
+                )}
+              </div>
+            ) : null}
           </div>
-          <div className="md:col-span-2">
+
+          
+          <div className="md:col-span-3">
             <label className="text-xs font-semibold text-slate-500">
               Observações
             </label>

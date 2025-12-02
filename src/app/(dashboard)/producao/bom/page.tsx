@@ -478,7 +478,7 @@ export default function BomPage() {
         console.log("🔎 Resposta do backend (BOM):", response);
 
         // 1️⃣ Preencher versão no formulário
-        if (response.version) {
+        if (response && response.version) {
           setBomData((prev) => ({
             ...prev,
             version: response.version,

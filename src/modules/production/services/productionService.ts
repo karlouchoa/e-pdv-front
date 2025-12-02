@@ -175,6 +175,7 @@ type ProductionOrderApiRecord = {
   total_cost?: number;
   unit_cost?: number;
   cost_breakdown?: CostBreakdownApi;
+  bom_id?: string; // Added bom_id property
 };
 
 type OrderFinishedGoodApi = {
@@ -284,6 +285,7 @@ const mapOrderFromApi = (record: ProductionOrderApiRecord): ProductionOrder => (
   unitCost:
     record.unit_cost === undefined ? undefined : Number(record.unit_cost),
   costBreakdown: mapCostBreakdownFromApi(record.cost_breakdown),
+  bomId: record.bom_id ?? "", // Ensure bomId is mapped
 });
 
 const mapOrderToApiPayload = (payload: ProductionOrderPayload) => ({

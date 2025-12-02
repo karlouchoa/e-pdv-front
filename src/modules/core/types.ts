@@ -132,6 +132,22 @@ export interface ProductionOrderPayload {
   dueDate: string;
   externalCode: string;
   notes?: string;
+
+  isComposed?: boolean;
+  isRawMaterial?: boolean;
+
+
+  bomId: string;                 // qual versão foi usada
+  lote?: number | null;
+  validate?: string | null;
+
+  rawMaterials: {
+    componentCode: string;
+    description?: string;
+    quantityUsed: number;
+    unit: string;
+    unitCost?: number;
+  }[];
 }
 
 export interface CostBreakdown {
@@ -235,13 +251,13 @@ export interface InventoryMovementRecord {
 }
 
 export interface InventoryMovementPayload {
-  itemId: number;
+  itemId: string;
   type: InventoryMovementType;
   quantity: number;
   unitPrice?: number;
   document?: InventoryDocumentInfo;
   notes?: string;
-  warehouse?: number;
+  warehouse?: string;
   customerOrSupplier?: number;
   date?: string;
 }

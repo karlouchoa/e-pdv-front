@@ -11,7 +11,7 @@ const navItems = [
   { href: "/dashboard", label: "Painel" },
   { href: "/cadastro/produtos", label: "Produtos & Matérias-primas" },
   { href: "/producao/bom", label: "Composição (BOM)" },
-  { href: "/estoque/entradas", label: "Entradas de Estoque" },
+  { href: "/estoque/entradas", label: "Movimentação de Estoque" },
   { href: "/producao/ordens", label: "Ordens de Produção" },
   { href: "/producao/controle", label: "Controle de Produção" },
 ];
