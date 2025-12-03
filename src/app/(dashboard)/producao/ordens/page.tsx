@@ -43,21 +43,50 @@ const buildInitialOrder = (): ProductionOrderPayload => {
     .slice(0, 10);
 
   return {
+    // ---- CAMPOS DO FORM PRINCIPAL ----
+    OP: "",
     productCode: "",
     quantityPlanned: 1000,
     unit: "UN",
     startDate: start,
     dueDate: due,
     externalCode: "",
-    notes: "",          // opcional, mas já deixo string vazia
+    notes: "",
 
-    bomId: "",          // ainda não selecionado
-    lote: null,         // nenhum lote definido ainda
-    validate: null,     // será calculado depois
+    bomId: "",
+    lote: null,
+    validate: null,
 
-    rawMaterials: [],   // lista inicia vazia
+    rawMaterials: [],
+
+    // ---- NOVOS CAMPOS DO FORMULÁRIO ----
+    boxesQty: 0,
+    boxCost: 0,
+    laborPerUnit: 0,
+    salePrice: 0,
+    markup: 0,
+    postSaleTax: 0,
+
+    customValidateDate: null,
+
+    // ---- CAMPOS DO BLOCO BOM (vêm depois da seleção) ----
+    referenceBom: {
+      productCode: "",
+      version: "0",
+      lotSize: 0,
+      validityDays: 0,
+    },
+
+    bomTotals: {
+      totalQuantity: 0,
+      totalCost: 0,
+    },
+
+    bomItems: [],
   };
 };
+
+
 
 const calculateValidate = (startDate: string) => {
   return dayjs(startDate).add(30, "day").format("YYYY-MM-DD");
@@ -65,7 +94,26 @@ const calculateValidate = (startDate: string) => {
 
 const buildProductionOrderPayload = (
   form: any,
-  rawMaterials: ProductionOrderPayload["rawMaterials"]
+  rawMaterials: ProductionOrderPayload["rawMaterials"],
+  referenceBom: any,
+  bomTotalsForPlan: any,
+  {
+    boxesQty,
+    boxCost,
+    laborPerUnit,
+    salePriceValue,
+    markupValue,
+    postSaleTax,
+    customValidateDate,
+  }: {
+    boxesQty: number;
+    boxCost: number;
+    laborPerUnit: number;
+    salePriceValue: number;
+    markupValue: number;
+    postSaleTax: number;
+    customValidateDate: string | null;
+  }
 ): ProductionOrderPayload => ({
   productCode: form.productCode,
   quantityPlanned: Number(form.quantityPlanned),
@@ -74,15 +122,50 @@ const buildProductionOrderPayload = (
   dueDate: form.dueDate,
   externalCode: form.externalCode,
 
-  // notes é opcional, então deve ser undefined quando vazio
-  notes: form.notes && form.notes.trim().length > 0 ? form.notes : undefined,
+  notes: form.notes?.trim() ? form.notes : undefined,
 
-  bomId: form.bomId || "",          // obrigatório pela interface
+  bomId: form.bomId || "",
   lote: form.lote ? Number(form.lote) : null,
-  validate: calculateValidate(form.startDate),
+  validate: customValidateDate || calculateValidate(form.startDate),
 
-  rawMaterials,                     // obrigatório
+  rawMaterials,
+
+  // ---- NOVOS BLOCOS ----
+
+  referenceBom: {
+    productCode: referenceBom?.productCode ?? "",
+    version: referenceBom?.version ?? 0,
+    lotSize: referenceBom.lotSize,
+    validityDays: referenceBom.validityDays,
+  },
+
+  bomTotals: {
+    totalQuantity: bomTotalsForPlan.totalQuantity,
+    totalCost: bomTotalsForPlan.totalCost,
+  },
+
+  bomItems: bomTotalsForPlan.items.map((item: any) => ({
+    componentCode: item.componentCode,
+    description: item.description ?? "",
+    quantity: item.quantity,
+    plannedQuantity: item.plannedQuantity,
+    unitCost: item.unitCost ?? 0,
+    plannedCost: item.plannedCost,
+  })),
+
+  // ---- CAMPOS DO FORMULÁRIO ----
+
+  boxesQty,
+  boxCost,
+  laborPerUnit,
+  salePrice: salePriceValue,
+  markup: markupValue,
+  postSaleTax,
+
+  customValidateDate,
 });
+
+
 
 const formatDateOrPlaceholder = (value?: string) =>
   value ? formatDate(value) : "--";
@@ -260,6 +343,26 @@ export default function ProductionOrdersPage() {
   const [bomDetails, setBomDetails] = useState<BomRecord | null>(null);
   const [bomItems, setBomItems] = useState<BomRecord["items"]>([]);
 
+  const [boxesQty, setBoxesQty] = useState(0);
+  
+  const [boxCostInput, setBoxCostInput] = useState("0,00");
+  const [boxCost, setBoxCost] = useState(0);
+
+  const [laborPerUnitInput, setLaborPerUnitInput] = useState("0,00");
+  const [laborPerUnit, setLaborPerUnit] = useState(0);
+  //const [salePriceInput, setSalePriceInput] = useState(0);
+
+  const [salePriceInput, setSalePriceInput] = useState("0,00"); // string para exibir
+  const [salePriceValue, setSalePriceValue] = useState(0);  // número real
+
+  const [markupInput, setMarkupInput] = useState("0,00");   // exibição
+  const [markupValue, setMarkupValue] = useState(0);    // numérico
+  const [postSaleTax, setPostSaleTax] = useState(0);
+  const [customValidateDate, setCustomValidateDate] = useState<string>("");
+
+  const [highlightIndex, setHighlightIndex] = useState(-1);
+  
+
   const printRef = useRef<HTMLDivElement>(null);
 
   const stripDiacritics = (value: string) =>
@@ -321,35 +424,51 @@ export default function ProductionOrdersPage() {
     );
   }, [boms, form.productCode]);
 
-  const referenceBom = useMemo<BomRecord | null>(() => {
-    if (bomDetails && form.bomId && bomDetails.id === form.bomId) {
-      return bomDetails;
-    }
+  const selectedBom = useMemo<BomRecord | null>(() => {
+    if (bomDetails && form.bomId && bomDetails.id === form.bomId) return bomDetails;
+  
     if (form.bomId) {
-      const byId = boms.find((bom) => bom.id === form.bomId);
+      const byId = boms.find(b => b.id === form.bomId);
       if (byId) return byId;
     }
-    if (availableBoms[0]) {
-      return availableBoms[0];
-    }
+  
+    if (availableBoms[0]) return availableBoms[0];
+  
     return null;
-  }, [availableBoms, bomDetails, boms, form.bomId, form.productCode]);
+  }, [availableBoms, bomDetails, boms, form.bomId]);
+  
 
   useEffect(() => {
-    setBomItems(referenceBom?.items ?? []);
-  }, [referenceBom]);
+    setBomItems(selectedBom?.items ?? []);
+  }, [selectedBom]);
 
   useEffect(() => {
-    if (!referenceBom || form.bomId) return;
+    if (!selectedBom || form.bomId) return;
     setForm((prev) => ({
       ...prev,
-      bomId: referenceBom.id,
-      productCode: prev.productCode || referenceBom.productCode,
+      bomId: selectedBom.id,
+      productCode: prev.productCode || selectedBom.productCode,
     }));
-  }, [form.bomId, referenceBom]);
+  }, [form.bomId, selectedBom]);
 
   const previewTotals = useMemo(() => {
-    if (!referenceBom) {
+    const sourceItems =
+    selectedBom?.items?.length ? selectedBom.items : bomItems ?? [];
+
+    if (!selectedBom && sourceItems.length === 0) {
+      return {
+        ingredients: 0,
+        labor: 0,
+        packaging: 0,
+        taxes: 0,
+        overhead: 0,
+        total: 0,
+        unit: 0,
+        marginAchieved: 0,
+      };
+    }
+
+    if (!selectedBom) {
       return calculateBomTotals({
         productCode: form.productCode || "PROD",
         version: "1.0",
@@ -357,57 +476,33 @@ export default function ProductionOrdersPage() {
         validityDays: 30,
         marginTarget: 10,
         marginAchieved: 0,
-        items: [
-          {
-            componentCode: "ING-001",
-            description: "Materia base",
-            quantity: form.quantityPlanned || 1,
-            unitCost: 2,
-          },
-        ],
+        items: sourceItems,
       });
     }
 
     return calculateBomTotals({
-      productCode: form.productCode || referenceBom.productCode || "PROD",
-      version: referenceBom.version || "1.0",
-      lotSize: form.quantityPlanned || referenceBom.lotSize,
-      validityDays: referenceBom.validityDays || 30,
-      marginTarget: referenceBom.marginTarget || 10,
-      marginAchieved: referenceBom.marginAchieved || 0,
-      items: referenceBom.items || [],
+      productCode: form.productCode || selectedBom.productCode || "PROD",
+      version: selectedBom.version || "1.0",
+      lotSize: form.quantityPlanned || selectedBom.lotSize,
+      validityDays: selectedBom.validityDays || 30,
+      marginTarget: selectedBom.marginTarget || 10,
+      marginAchieved: selectedBom.marginAchieved || 0,
+      items: selectedBom.items || [],
     });
-  }, [form, referenceBom]);
+  }, [form, selectedBom]);
 
   const formatCurrencyOrDash = (value?: number) =>
     typeof value === "number" ? formatCurrency(value) : "--";
 
-  // const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
-  //   event.preventDefault();
-  //   if (!session) return;
-  //   setMessage(null);
-  //   try {
-  //     const created = await createProductionOrder(session, form);
-  //     setOrders((prev) => [created, ...prev]);
-  //     setSelectedOrderId(created.id);
-  //     setForm(buildInitialOrder());
-  //     setMessage(`OP ${created.externalCode} criada com sucesso.`);
-  //   } catch (error) {
-  //     setMessage(
-  //       error instanceof Error ? error.message : "Falha ao criar OP",
-  //     );
-  //   }
-  // };
-
-  const validateDate = referenceBom
+  const validateDate = selectedBom
     ? dayjs(form.startDate)
-        .add(referenceBom.validityDays || 0, "day")
+        .add(selectedBom.validityDays || 0, "day")
         .format("YYYY-MM-DD")
     : null;
   
   const buildRawMaterials = () => {
-    if (!referenceBom && (!bomItems || bomItems.length === 0)) return [];
-    const items = referenceBom?.items?.length ? referenceBom.items : bomItems;
+    if (!selectedBom && (!bomItems || bomItems.length === 0)) return [];
+    const items = selectedBom?.items?.length ? selectedBom.items : bomItems;
     return (items ?? []).map((item) => ({
       componentCode: item.componentCode,
       description: item.description,
@@ -467,6 +562,8 @@ export default function ProductionOrdersPage() {
     try {
       const rawMaterials = buildRawMaterials();
   
+      const validateForPayload = customValidateDate || validateDate;
+
       const payload: ProductionOrderPayload = {
         productCode: form.productCode,
         quantityPlanned: form.quantityPlanned,
@@ -474,12 +571,45 @@ export default function ProductionOrdersPage() {
         startDate: form.startDate,
         dueDate: form.dueDate,
         externalCode: form.externalCode,
-        notes: form.notes,
+        notes: form.notes && form.notes.trim() !== "" ? form.notes : undefined,
         bomId: form.bomId,
         lote: form.lote || null,
-        validate: validateDate,
+        validate: validateForPayload,
         rawMaterials,
+      
+        // ---- CAMPOS NOVOS DO FORMULÁRIO ----
+        boxesQty,
+        boxCost,
+        laborPerUnit,
+        salePrice: salePriceValue,
+        markup: markupValue,
+        postSaleTax,
+        customValidateDate: customValidateDate || null,
+      
+        // ---- NOVOS CAMPOS DO BLOCO DE BOM ----
+        referenceBom: {
+          productCode: selectedBom?.productCode ?? "",
+          version: selectedBom?.version ?? "",  
+          lotSize: selectedBom?.lotSize ?? 0,
+          validityDays: selectedBom?.validityDays ?? 0,
+        },
+      
+        bomTotals: {
+          totalQuantity: bomTotalsForPlan.totalQuantity,
+          totalCost: bomTotalsForPlan.totalCost,
+        },
+      
+        bomItems: bomTotalsForPlan.items.map((item) => ({
+          componentCode: item.componentCode,
+          description: item.description ?? "",
+          quantity: item.quantity,
+          plannedQuantity: item.plannedQuantity,
+          unitCost: item.unitCost ?? 0,
+          plannedCost: item.plannedCost,
+        })),
       };
+      
+      console.log("Payload a ser enviado:", payload);
   
       const created = await createProductionOrder(session, payload);
   
@@ -493,8 +623,8 @@ export default function ProductionOrdersPage() {
   };
   
   const bomTotalsForPlan = useMemo(() => {
-    const sourceItems = referenceBom?.items?.length
-      ? referenceBom.items
+    const sourceItems = selectedBom?.items?.length
+      ? selectedBom.items
       : (bomItems ?? []);
     if (!sourceItems.length) {
       return {
@@ -528,24 +658,118 @@ export default function ProductionOrdersPage() {
       totalQuantity,
       totalCost,
     };
-  }, [bomItems, form.quantityPlanned, referenceBom]);
+  }, [bomItems, form.quantityPlanned, selectedBom]);
+
+  const plannedQty = form.quantityPlanned || 0;
+  const packagingCost = boxesQty * boxCost;
+  const extraLaborCost = laborPerUnit * plannedQty;
+  const baseProductionCost = bomTotalsForPlan?.totalCost ?? 0;
+  const baseUnitMpCost = plannedQty > 0 ? bomTotalsForPlan.totalCost / plannedQty : 0;
+  const packagingUnitCost = plannedQty > 0 ? packagingCost / plannedQty : 0;
+  const productionUnitCost = baseUnitMpCost + packagingUnitCost + laborPerUnit;
+  const totalWithExtras = productionUnitCost * plannedQty;
+  const unitCostWithExtras = productionUnitCost;
+
+  const derivedSalePrice =
+    salePriceValue > 0
+      ? salePriceValue
+      : markupValue > 0
+        ? unitCostWithExtras * (1 + markupValue / 100)
+        : 0;
+
+  const salePricePerUnit = Number.isFinite(derivedSalePrice)
+    ? derivedSalePrice
+    : 0;
+
+  const saleMarkupApplied =
+    unitCostWithExtras > 0
+      ? ((salePricePerUnit - unitCostWithExtras) / unitCostWithExtras) * 100
+      : 0;
+
+  const revenueTotal = salePricePerUnit * plannedQty;
+  const postSaleTaxValue = revenueTotal * ((postSaleTax || 0) / 100);
+  const netRevenueTotal = revenueTotal - postSaleTaxValue;
+  const profitTotal = revenueTotal - (totalWithExtras + postSaleTaxValue);
+
+  const handleMarkupChange = (text: string) => {
+    // 1) Mantém string original digitada
+    setMarkupInput(text);
+  
+    // 2) Normaliza
+    const normalized = text.replace(",", ".");
+    const value = Number(normalized);
+  
+    // 3) Se válido, atualiza valor numérico
+    if (!isNaN(value)) {
+      setMarkupValue(value);
+  
+      if (unitCostWithExtras > 0) {
+        const calculatedSalePrice = unitCostWithExtras * (1 + value / 100);
+  
+        // Atualiza o valor numérico real
+        setSalePriceValue(calculatedSalePrice);
+  
+        // Atualiza o valor exibido com vírgula e 2 casas
+        setSalePriceInput(
+          calculatedSalePrice.toFixed(2).replace(".", ",")
+        );
+      }
+    }
+  };
+  
+
+  const handleSalePriceChange = (text: string) => {
+    // 1) Mantém o texto digitado (preserva cursor)
+    setSalePriceInput(text);
+  
+    // 2) Normaliza vírgula → ponto para converter
+    const normalized = text.replace(",", ".");
+    const value = Number(normalized);
+    
+    // 3) Se for número válido, calcula o markup
+    if (!isNaN(value)) {
+      
+      setSalePriceValue(value);
+      
+      if (unitCostWithExtras > 0) {
+        const calculatedMarkup = ((value - unitCostWithExtras) / unitCostWithExtras) * 100;
+        setMarkupValue(calculatedMarkup);
+         
+        setMarkupInput(calculatedMarkup.toFixed(2).replace(".", ","));
+      } else {
+        setMarkupValue(0);
+        setMarkupInput("0,00");
+      }
+    }
+  };
+
+  const handlesetBoxCostChange = (text: string) => {
+    setBoxCostInput(text);
+    const normalized = text.replace(",", ".");
+    const value = Number(normalized);
+    if (!isNaN(value)) {
+      setBoxCost(value);
+    }
+  }
+
+  const handleLaborPerUnitChange = (text: string) => {
+    setLaborPerUnitInput(text);
+    const normalized = text.replace(",", ".");
+    const value = Number(normalized);
+    if (!isNaN(value)) {
+      setLaborPerUnit(value);
+    }
+  }
   
   const handleSelectItem = (item: ItemRecord) => {
     setForm((prev) => ({
-      ...prev,
-      notes: item.notes ?? "",
-      productCode: item.cditem,
+      ...prev,                          // mantém tudo que já existe
+      productCode: item.cditem,        // codigo do produto
+      notes: item.notes ?? "",         // notas pré-existentes
       isComposed: item.isComposed,
       isRawMaterial: item.isRawMaterial,
-      quantityPlanned: prev.quantityPlanned,
-      startDate: prev.startDate,
-      dueDate: prev.dueDate,
-      externalCode: prev.externalCode,
-      bomId: prev.bomId,
-      lote: prev.lote,
-      validate: prev.validate,
-      rawMaterials: prev.rawMaterials,
     }));
+  
     setSearchTerm(item.name);
     setShowSearchResults(false);
   };
@@ -642,20 +866,49 @@ export default function ProductionOrdersPage() {
               onChange={(event) => {
                 setSearchTerm(event.target.value);
                 setShowSearchResults(true);
+                setHighlightIndex(-1); // reset
+              }}
+              onKeyDown={(event) => {
+                if (!showSearchResults || searchResults.length === 0) return;
+
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  setHighlightIndex((prev) =>
+                    prev < searchResults.length - 1 ? prev + 1 : prev
+                  );
+                }
+
+                if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  setHighlightIndex((prev) => (prev > 0 ? prev - 1 : prev));
+                }
+
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  if (highlightIndex >= 0) {
+                    handleSelectItem(searchResults[highlightIndex]);
+                  }
+                }
+
+                if (event.key === "Escape") {
+                  setShowSearchResults(false);
+                }
               }}
               placeholder="Digite parte do nome, código ou código de barras"
               className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-2"
             />
+
             {searchTerm.trim() && showSearchResults ? (
               <div className="relative mt-2">
                 {searchResults.length > 0 ? (
                   <div className="absolute z-10 max-h-64 w-full divide-y divide-slate-100 overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-lg">
-                    {searchResults.map((item) => (
+                    {searchResults.map((item, index) => (
                       <button
                         type="button"
                         key={item.id}
                         onClick={() => handleSelectItem(item)}
-                        className="w-full px-4 py-3 text-left hover:bg-blue-50 focus:bg-blue-50"
+                        className={`w-full px-4 py-3 text-left 
+                          ${index === highlightIndex ? "bg-blue-50" : "hover:bg-blue-50"}`} 
                       >
                         <p className="text-sm font-semibold text-slate-900">
                           {item.name}
@@ -687,24 +940,11 @@ export default function ProductionOrdersPage() {
               <option value="">Selecione</option>
               {availableBoms.map((bom) => (
                 <option key={bom.id} value={bom.id}>
-                  Versao {bom.version} - Lote {bom.lotSize} - {bom.validityDays} dias
+                  Versao {bom.version} 
                 </option>
               ))}
             </select>
           </div>
-          {/* <div>
-            <label className="text-xs font-semibold text-slate-500">
-              Código / OP
-            </label>
-            <input
-              value={form.externalCode}
-              onChange={(event) =>
-                setForm({ ...form, externalCode: event.target.value })
-              }
-              required
-              className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2"
-            />
-          </div> */}
           <div>
             <label className="text-xs font-semibold text-slate-500">
               Quantidade planejada
@@ -765,7 +1005,15 @@ export default function ProductionOrdersPage() {
             />
           </div>
           <div>
-
+            <label className="text-xs font-semibold text-slate-500">
+              Validade do lote
+            </label>
+            <input
+              type="date"
+              value={customValidateDate || validateDate || ""}
+              onChange={(event) => setCustomValidateDate(event.target.value)}
+              className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2"
+            />
           </div>
          
           <div>
@@ -781,6 +1029,94 @@ export default function ProductionOrdersPage() {
               className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2"
             />
           </div>
+          <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                Quantidade de caixas
+              </label>
+              <input
+                type="number"
+                value={boxesQty}
+                onChange={(e) => setBoxesQty(Number(e.target.value))}
+                className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                Custo por caixa
+              </label>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={boxCostInput}
+                onChange={(e) => handlesetBoxCostChange(e.target.value)}
+                onBlur={() => {
+                  setBoxCostInput(boxCost.toFixed(2).replace(".", ","));
+                }}
+                className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                Mão de obra por unidade
+              </label>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={laborPerUnitInput}
+                onChange={(e) => handleLaborPerUnitChange(e.target.value)}
+                onBlur={() => {
+                  setLaborPerUnitInput(laborPerUnit.toFixed(2).replace(".", ","));
+                }}
+                className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2"
+              />
+            </div>
+          </div>
+          <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                Preço unitário de venda
+              </label>
+              <input
+                type="text"
+                inputMode="decimal"   // mostra teclado numérico no mobile
+                value={salePriceInput}
+                onChange={(e) => handleSalePriceChange(e.target.value)}
+                onBlur={() => {
+                  setSalePriceInput(salePriceValue.toFixed(2).replace(".", ","));
+                }}
+                className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                Markup (%)
+              </label>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={markupInput}
+                onChange={(e) => handleMarkupChange(e.target.value)}
+                onBlur={() => {
+                  setMarkupInput(markupValue.toFixed(2).replace(".", ","));
+                }}
+                className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                Impostos pós-venda (%)
+              </label>
+              <input
+                type="number"
+                min={0}
+                step="0.01"
+                value={postSaleTax}
+                onChange={(e) => setPostSaleTax(Number(e.target.value))}
+                className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2"
+              />
+            </div>
+          </div>
           <div className="md:col-span-3">
             <label className="text-xs font-semibold text-slate-500">
               Observacoes
@@ -794,16 +1130,16 @@ export default function ProductionOrdersPage() {
             />
           </div>
 
-          {referenceBom ? (
+          {selectedBom ? (
             <div className="md:col-span-3 space-y-3">
               <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
                 <div>
                   <p className="text-xs uppercase text-slate-500">Ficha técnica selecionada</p>
                   <p className="text-sm font-semibold text-slate-900">
-                    {referenceBom.productCode} • Versão {referenceBom.version}
+                    {selectedBom.productCode} • Versão {selectedBom.version}
                   </p>
                   <p className="text-xs text-slate-500">
-                    Lote base {referenceBom.lotSize} | Validade {referenceBom.validityDays} dias
+                    Lote base {selectedBom.lotSize} | Validade {selectedBom.validityDays} dias
                   </p>
                 </div>
                 <div className="grid grid-cols-1 gap-2 text-sm md:grid-cols-2">
@@ -866,13 +1202,18 @@ export default function ProductionOrdersPage() {
           <div className="md:col-span-3">
             <button
               type="submit"
-              className="w-full bg-blue-600 text-white py-3 rounded-2xl font-semibold"
+              
+              className="w-full bg-blue-600 text-white py-3 rounded-2xl font-semibold
+              hover:bg-blue-700
+                cursor-pointer
+                transition
+              "
             >
               Gerar OP e calcular custos
             </button>
           </div>
         </form>
-        {bomItems.length > 0 && (
+        {/* {bomItems.length > 0 && (
           <SectionCard title="Ficha Técnica Selecionada" description="Base de custo e proporções">
             <table className="w-full text-sm">
               <thead>
@@ -900,7 +1241,7 @@ export default function ProductionOrdersPage() {
               </tbody>
             </table>
           </SectionCard>
-        )}
+        )} */}
 
       </SectionCard>
 
@@ -908,22 +1249,53 @@ export default function ProductionOrdersPage() {
         title="Custos previstos"
         description="Baseado na ficha tecnica vigente"
       >
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="border border-slate-200 rounded-2xl p-4">
-            <p className="text-xs text-slate-500">Ingredientes</p>
-            <p className="text-xl font-semibold">{formatCurrency(previewTotals.ingredients)}</p>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">
+          <div className="border border-slate-200 rounded-2xl p-4 bg-slate-50">
+            <p className="text-xs text-slate-500">Custo unitário produção</p>
+            <p className="text-xl font-semibold">{formatCurrency(productionUnitCost)}</p>
           </div>
           <div className="border border-slate-200 rounded-2xl p-4">
-            <p className="text-xs text-slate-500">Mao de obra</p>
-            <p className="text-xl font-semibold">{formatCurrency(previewTotals.labor)}</p>
+            <p className="text-xs text-slate-500">Embalagens (caixas)</p>
+            <p className="text-xl font-semibold">{formatCurrency(packagingCost)}</p>
+            <p className="text-xs text-slate-500 mt-1">
+              {boxesQty} caixas x {formatCurrency(boxCost)}
+            </p>
+          </div>
+          <div className="border border-slate-200 rounded-2xl p-4 bg-slate-50">
+            <p className="text-xs text-slate-500">Mão de obra extra</p>
+            <p className="text-xl font-semibold">{formatCurrency(extraLaborCost)}</p>
+            <p className="text-xs text-slate-500 mt-1">
+              {formatCurrency(laborPerUnit)} / un x {form.quantityPlanned}
+            </p>
           </div>
           <div className="border border-slate-200 rounded-2xl p-4">
-            <p className="text-xs text-slate-500">Impostos</p>
-            <p className="text-xl font-semibold">{formatCurrency(previewTotals.taxes)}</p>
+            <p className="text-xs text-slate-500">Custo total com extras</p>
+            <p className="text-xl font-semibold">{formatCurrency(totalWithExtras)}</p>
+            <p className="text-xs text-slate-500 mt-1">
+              Unitário: {formatCurrency(unitCostWithExtras)}
+            </p>
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">
+          <div className="border border-slate-200 rounded-2xl p-4">
+            <p className="text-xs text-slate-500">Preço unitário venda</p>
+            <p className="text-xl font-semibold">{formatCurrency(salePricePerUnit)}</p>
+            <p className="text-xs text-slate-500 mt-1">Markup aplicado: {saleMarkupApplied.toFixed(2)}%</p>
+          </div>
+          <div className="border border-slate-200 rounded-2xl p-4 bg-slate-50">
+            <p className="text-xs text-slate-500">Impostos pós-venda</p>
+            <p className="text-xl font-semibold">{formatCurrency(postSaleTaxValue)}</p>
+            <p className="text-xs text-slate-500 mt-1">{postSaleTax}% sobre preço</p>
           </div>
           <div className="border border-slate-200 rounded-2xl p-4">
-            <p className="text-xs text-slate-500">Custo total lote</p>
-            <p className="text-xl font-semibold">{formatCurrency(previewTotals.total)}</p>
+            <p className="text-xs text-slate-500">Receita total</p>
+            <p className="text-xl font-semibold">{formatCurrency(revenueTotal)}</p>
+            <p className="text-xs text-slate-500 mt-1">Líquida: {formatCurrency(netRevenueTotal)}</p>
+          </div>
+          <div className="border border-slate-200 rounded-2xl p-4 bg-slate-50">
+            <p className="text-xs text-slate-500">Lucro estimado</p>
+            <p className="text-xl font-semibold">{formatCurrency(profitTotal)}</p>
+            <p className="text-xs text-slate-500 mt-1">vs custo: {saleMarkupApplied.toFixed(2)}%</p>
           </div>
         </div>
       </SectionCard>
@@ -957,7 +1329,7 @@ export default function ProductionOrdersPage() {
                     }`}
                   >
                     <td className="px-4 py-2 font-semibold text-slate-900">
-                      {order.externalCode}
+                      {order.OP}
                     </td>
                     <td className="px-4 py-2">{order.productCode}</td>
                     <td className="px-4 py-2">{order.quantityPlanned}</td>
@@ -980,7 +1352,7 @@ export default function ProductionOrdersPage() {
 
       {selectedOrder ? (
         <SectionCard
-          title={`Resumo da OP ${selectedOrder.externalCode}`}
+          title={`Resumo da OP ${selectedOrder.OP}`}
           description="Detalhes registrados no backend"
         >
           <div ref={printRef} className="space-y-6">

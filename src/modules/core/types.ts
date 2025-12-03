@@ -125,6 +125,8 @@ export interface BomRecord extends BomPayload {
 }
 
 export interface ProductionOrderPayload {
+  id?: string;
+  OP?: string;
   productCode: string;
   quantityPlanned: number;
   unit: string;
@@ -132,15 +134,16 @@ export interface ProductionOrderPayload {
   dueDate: string;
   externalCode: string;
   notes?: string;
+  status?: ProductionStatus;
 
   isComposed?: boolean;
   isRawMaterial?: boolean;
 
-
-  bomId: string;                 // qual versão foi usada
+  bomId: string;                 
   lote?: number | null;
   validate?: string | null;
 
+  // Lista original de MP usada pelo backend
   rawMaterials: {
     componentCode: string;
     description?: string;
@@ -148,7 +151,44 @@ export interface ProductionOrderPayload {
     unit: string;
     unitCost?: number;
   }[];
+
+  // ---- NOVOS CAMPOS QUE VOCÊ DECIDIU ENVIAR ----
+
+  referenceBom: {
+    productCode: string;
+    version: string;
+    lotSize: number;
+    validityDays: number;
+  };
+
+  bomTotals: {
+    totalQuantity: number;
+    totalCost: number;
+  };
+
+  bomItems: {
+    componentCode: string;
+    description: string;
+    quantity: number;        // base
+    plannedQuantity: number;
+    unitCost: number;
+    plannedCost: number;
+  }[];
+
+  // ---- CAMPOS DE CUSTO E FORMULÁRIO ----
+  boxesQty: number;
+  boxCost: number;
+  laborPerUnit: number;
+  salePrice: number;
+  markup: number;
+  postSaleTax: number;
+
+  
+
+  customValidateDate?: string | null;
 }
+
+
 
 export interface CostBreakdown {
   ingredients: number;
@@ -202,6 +242,7 @@ export interface RecordRawMaterialPayload {
 
 export interface ProductionOrder extends ProductionOrderPayload {
   id: string;
+  OP: string;
   status: ProductionStatus;
   createdAt?: string;
   updatedAt?: string;

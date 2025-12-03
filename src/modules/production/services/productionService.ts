@@ -159,6 +159,7 @@ const mapBomUpdateToApiPayload = (payload: BomUpdatePayload) => {
 
 type ProductionOrderApiRecord = {
   id: string;
+  OP?: string;
   external_code?: string;
   product_code?: string;
   quantity_planned?: number;
@@ -167,6 +168,8 @@ type ProductionOrderApiRecord = {
   due_date?: string;
   notes?: string;
   status?: ProductionStatus;
+  is_composed?: boolean;
+  is_raw_material?: boolean;
   created_at?: string;
   updated_at?: string;
   finished_goods?: OrderFinishedGoodApi[];
@@ -175,7 +178,19 @@ type ProductionOrderApiRecord = {
   total_cost?: number;
   unit_cost?: number;
   cost_breakdown?: CostBreakdownApi;
-  bom_id?: string; // Added bom_id property
+  bom_id?: string; 
+  reference_bom?: ReferenceBomApi;
+  bom_totals?: BomTotalsApi;
+  bom_items?: BomItemApi[];
+  boxes_qty?: number;
+  box_cost?: number;
+  labor_per_unit?: number;
+  sale_price?: number;
+  markup?: number;
+  post_sale_tax?: number;
+  lote?: number | null;
+  validate?: string | null;
+  custom_validate_date?: string | null;
 };
 
 type OrderFinishedGoodApi = {
@@ -216,6 +231,28 @@ type CostBreakdownApi = {
   taxes?: number;
   overhead?: number;
 };
+
+type ReferenceBomApi = {
+    product_code?: string;
+    version?: string;
+    lot_size?: number;
+    validity_days?: number;
+  };
+  
+  type BomTotalsApi = {
+    total_quantity?: number;
+    total_cost?: number;
+  };
+  
+  type BomItemApi = {
+    component_code?: string;
+    description?: string;
+    quantity?: number;
+    planned_quantity?: number;
+    unit_cost?: number;
+    planned_cost?: number;
+  };
+
 
 const mapFinishedGoodFromApi = (
   item: OrderFinishedGoodApi,
@@ -267,6 +304,7 @@ const mapCostBreakdownFromApi = (
 
 const mapOrderFromApi = (record: ProductionOrderApiRecord): ProductionOrder => ({
   id: record.id,
+  OP: record.OP ?? "",      
   productCode: record.product_code ?? "",
   quantityPlanned: Number(record.quantity_planned ?? 0),
   unit: record.unit ?? "UN",
@@ -275,6 +313,8 @@ const mapOrderFromApi = (record: ProductionOrderApiRecord): ProductionOrder => (
   externalCode: record.external_code ?? "",
   notes: record.notes ?? "",
   status: record.status ?? "SEPARACAO",
+  isComposed: record.is_composed ?? false,
+  isRawMaterial: record.is_raw_material ?? false,
   createdAt: record.created_at,
   updatedAt: record.updated_at,
   finishedGoods: (record.finished_goods ?? []).map(mapFinishedGoodFromApi),
@@ -285,7 +325,34 @@ const mapOrderFromApi = (record: ProductionOrderApiRecord): ProductionOrder => (
   unitCost:
     record.unit_cost === undefined ? undefined : Number(record.unit_cost),
   costBreakdown: mapCostBreakdownFromApi(record.cost_breakdown),
-  bomId: record.bom_id ?? "", // Ensure bomId is mapped
+  bomId: record.bom_id ?? "",
+  referenceBom: {
+    productCode: record.reference_bom?.product_code ?? "",
+    version: record.reference_bom?.version ?? "",
+    lotSize: Number(record.reference_bom?.lot_size ?? 0),
+    validityDays: Number(record.reference_bom?.validity_days ?? 0),
+  },
+  bomTotals: {
+    totalQuantity: Number(record.bom_totals?.total_quantity ?? 0),
+    totalCost: Number(record.bom_totals?.total_cost ?? 0),
+  },
+  bomItems: (record.bom_items ?? []).map((item) => ({
+    componentCode: item.component_code ?? "",
+    description: item.description ?? "",
+    quantity: Number(item.quantity ?? 0),
+    plannedQuantity: Number(item.planned_quantity ?? 0),
+    unitCost: Number(item.unit_cost ?? 0),
+    plannedCost: Number(item.planned_cost ?? 0),
+  })),
+  boxesQty: Number(record.boxes_qty ?? 0),
+  boxCost: Number(record.box_cost ?? 0),
+  laborPerUnit: Number(record.labor_per_unit ?? 0),
+  salePrice: Number(record.sale_price ?? 0),
+  markup: Number(record.markup ?? 0),
+  postSaleTax: Number(record.post_sale_tax ?? 0),
+  lote: record.lote ?? null,
+  validate: record.validate ?? null,
+  customValidateDate: record.custom_validate_date ?? null,
 });
 
 const mapOrderToApiPayload = (payload: ProductionOrderPayload) => ({
@@ -296,33 +363,117 @@ const mapOrderToApiPayload = (payload: ProductionOrderPayload) => ({
   start_date: payload.startDate,
   due_date: payload.dueDate,
   notes: sanitizeNotes(payload.notes) ?? "",
+  bom_id: payload.bomId,
+  is_composed: payload.isComposed,
+  is_raw_material: payload.isRawMaterial,
+  lote: payload.lote,
+  validate: payload.validate,
+  custom_validate_date: payload.customValidateDate,
+  reference_bom: payload.referenceBom && {
+    product_code: payload.referenceBom.productCode,
+    version: payload.referenceBom.version,
+    lot_size: payload.referenceBom.lotSize,
+    validity_days: payload.referenceBom.validityDays,
+  },
+  bom_totals: payload.bomTotals && {
+    total_quantity: payload.bomTotals.totalQuantity,
+    total_cost: payload.bomTotals.totalCost,
+  },
+  bom_items: payload.bomItems?.map((item) => ({
+    component_code: item.componentCode,
+    description: item.description,
+    quantity: item.quantity,
+    planned_quantity: item.plannedQuantity,
+    unit_cost: item.unitCost,
+    planned_cost: item.plannedCost,
+  })),
+  boxes_qty: payload.boxesQty,
+  box_cost: payload.boxCost,
+  labor_per_unit: payload.laborPerUnit,
+  sale_price: payload.salePrice,
+  markup: payload.markup,
+  post_sale_tax: payload.postSaleTax,
+  raw_materials: payload.rawMaterials?.map((item) => ({
+    component_code: item.componentCode,
+    description: item.description,
+    quantity_used: item.quantityUsed,
+    unit: item.unit,
+    unit_cost: item.unitCost,
+  })),
 });
 
 const mapOrderUpdateToApiPayload = (
   payload: ProductionOrderUpdatePayload,
 ) => {
   const body: Record<string, unknown> = {};
-  if (payload.externalCode !== undefined) {
-    body.external_code = payload.externalCode;
-  }
-  if (payload.productCode !== undefined) {
-    body.product_code = payload.productCode;
-  }
-  if (payload.quantityPlanned !== undefined) {
-    body.quantity_planned = payload.quantityPlanned;
-  }
-  if (payload.unit !== undefined) {
-    body.unit = payload.unit;
-  }
-  if (payload.startDate !== undefined) {
-    body.start_date = payload.startDate;
-  }
-  if (payload.dueDate !== undefined) {
-    body.due_date = payload.dueDate;
-  }
-  if (payload.notes !== undefined) {
-    body.notes = sanitizeNotes(payload.notes);
-  }
+   if (payload.externalCode !== undefined) {
+     body.external_code = payload.externalCode;
+   }
+   if (payload.productCode !== undefined) {
+     body.product_code = payload.productCode;
+   }
+   if (payload.quantityPlanned !== undefined) {
+     body.quantity_planned = payload.quantityPlanned;
+   }
+   if (payload.unit !== undefined) {
+     body.unit = payload.unit;
+   }
+   if (payload.startDate !== undefined) {
+     body.start_date = payload.startDate;
+   }
+   if (payload.dueDate !== undefined) {
+     body.due_date = payload.dueDate;
+   }
+   if (payload.notes !== undefined) {
+     body.notes = sanitizeNotes(payload.notes);
+   }
+   if (payload.bomId !== undefined) body.bom_id = payload.bomId;
+   if (payload.isComposed !== undefined) body.is_composed = payload.isComposed;
+   if (payload.isRawMaterial !== undefined) body.is_raw_material = payload.isRawMaterial;
+   if (payload.lote !== undefined) body.lote = payload.lote;
+   if (payload.validate !== undefined) body.validate = payload.validate;
+   if (payload.customValidateDate !== undefined) {
+     body.custom_validate_date = payload.customValidateDate;
+   }
+   if (payload.referenceBom !== undefined) {
+      body.reference_bom = {
+       product_code: payload.referenceBom.productCode,
+       version: payload.referenceBom.version,
+       lot_size: payload.referenceBom.lotSize,
+       validity_days: payload.referenceBom.validityDays,
+    };
+   }
+   if (payload.bomTotals !== undefined) {
+     body.bom_totals = {
+       total_quantity: payload.bomTotals.totalQuantity,
+       total_cost: payload.bomTotals.totalCost,
+     };
+   }
+   if (payload.bomItems !== undefined) {
+     body.bom_items = payload.bomItems.map((item) => ({
+       component_code: item.componentCode,
+       description: item.description,
+       quantity: item.quantity,
+       planned_quantity: item.plannedQuantity,
+       unit_cost: item.unitCost,
+       planned_cost: item.plannedCost,
+     }));
+   }
+   if (payload.boxesQty !== undefined) body.boxes_qty = payload.boxesQty;
+   if (payload.boxCost !== undefined) body.box_cost = payload.boxCost;
+   if (payload.laborPerUnit !== undefined) body.labor_per_unit = payload.laborPerUnit;
+   if (payload.salePrice !== undefined) body.sale_price = payload.salePrice;
+   if (payload.markup !== undefined) body.markup = payload.markup;
+   if (payload.postSaleTax !== undefined) body.post_sale_tax = payload.postSaleTax;
+   if (payload.rawMaterials !== undefined) {
+     body.raw_materials = payload.rawMaterials.map((item) => ({
+       component_code: item.componentCode,
+       description: item.description,
+       quantity_used: item.quantityUsed,
+       unit: item.unit,
+       unit_cost: item.unitCost,
+   }));
+   }
   return body;
 };
 
@@ -482,6 +633,8 @@ export async function createProductionOrder(
     method: "POST",
     data: mapOrderToApiPayload(payload),
   });
+
+  console.log("createProductionOrder response:", response);
   return mapOrderFromApi(response);
 }
 
@@ -501,6 +654,8 @@ export async function listProductionOrders(
     path,
     method: "GET",
   });
+
+  console.log("listProductionOrders response:", response);
   return Array.isArray(response) ? response.map(mapOrderFromApi) : [];
 }
 

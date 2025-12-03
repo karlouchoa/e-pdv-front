@@ -133,7 +133,7 @@ export default function DashboardPage() {
                 >
                   <div>
                     <p className="text-sm font-semibold text-slate-900">
-                      OP {order.externalCode} • {order.productCode}
+                      OP {order.OP} • {order.productCode}
                     </p>
                     <p className="text-xs text-slate-500">
                       {order.quantityPlanned} {order.unit} • entrega{" "}
