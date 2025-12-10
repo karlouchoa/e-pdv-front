@@ -20,11 +20,20 @@ export interface SessionUser {
   role?: string;
 }
 
+export interface UserCompany {
+  id: string;
+  code: string;
+  name: string;
+  label: string;
+}
+
 export interface SessionData {
   token: string;
   refreshToken?: string;
   tenant: TenantInfo;
   user: SessionUser;
+  warehouse?: string | null;
+  warehouseLabel?: string | null;
   expiresIn?: string;
   loginMessage?: string;
   authPayload?: Record<string, unknown>;
@@ -64,6 +73,8 @@ export interface ProductPayload {
   cest?: string;
   cst?: string;
   barcode?: string;
+  authoruser?: string;
+  
 }
 
 export interface Product extends ProductPayload {
@@ -125,57 +136,21 @@ export interface BomRecord extends BomPayload {
 }
 
 export interface ProductionOrderPayload {
-  id?: string;
-  OP?: string;
   productCode: string;
+  productName?: string;
   quantityPlanned: number;
   unit: string;
   startDate: string;
   dueDate: string;
   externalCode: string;
   notes?: string;
-  status?: ProductionStatus;
-
-  isComposed?: boolean;
-  isRawMaterial?: boolean;
+  OP?: string;
 
   bomId: string;                 
   lote?: number | null;
   validate?: string | null;
+  customValidateDate?: string | null;
 
-  // Lista original de MP usada pelo backend
-  rawMaterials: {
-    componentCode: string;
-    description?: string;
-    quantityUsed: number;
-    unit: string;
-    unitCost?: number;
-  }[];
-
-  // ---- NOVOS CAMPOS QUE VOCÊ DECIDIU ENVIAR ----
-
-  referenceBom: {
-    productCode: string;
-    version: string;
-    lotSize: number;
-    validityDays: number;
-  };
-
-  bomTotals: {
-    totalQuantity: number;
-    totalCost: number;
-  };
-
-  bomItems: {
-    componentCode: string;
-    description: string;
-    quantity: number;        // base
-    plannedQuantity: number;
-    unitCost: number;
-    plannedCost: number;
-  }[];
-
-  // ---- CAMPOS DE CUSTO E FORMULÁRIO ----
   boxesQty: number;
   boxCost: number;
   laborPerUnit: number;
@@ -183,9 +158,18 @@ export interface ProductionOrderPayload {
   markup: number;
   postSaleTax: number;
 
-  
+  authoruser?: string;
 
-  customValidateDate?: string | null;
+  rawMaterials: {
+    componentCode: string;
+    description?: string;
+    quantityUsed: number;
+    unit: string;
+    unitCost: number;
+    warehouse?: string | null;
+    batchNumber?: string | null;
+  }[];
+   
 }
 
 
@@ -221,9 +205,12 @@ export interface OrderRawMaterial {
   id: string;
   componentCode: string;
   description?: string;
+  quantity: number;
   quantityUsed: number;
+  plannedQuantity: number;
   unit: string;
   unitCost?: number;
+  plannedcost?: number;
   warehouse?: string;
   batchNumber?: string;
   consumedAt?: string;
@@ -240,26 +227,85 @@ export interface RecordRawMaterialPayload {
   consumedAt?: string;
 }
 
-export interface ProductionOrder extends ProductionOrderPayload {
+export interface ProductionOrder {
   id: string;
   OP: string;
+  bomId: string;
+  productCode: string;
+  productName?: string;
+  quantityPlanned: number;
+  unit: string;
+  startDate: string;
+  dueDate: string;
+  externalCode: string;
+  notes?: string;
+
   status: ProductionStatus;
-  createdAt?: string;
-  updatedAt?: string;
-  finishedGoods: OrderFinishedGood[];
+  author_user?: string;
+
+  lote?: number | null;
+  validate?: string | null;
+  customValidateDate?: string | null;
+
   rawMaterials: OrderRawMaterial[];
+  finishedGoods: OrderFinishedGood[];
   statusHistory?: ProductionStatusEvent[];
-  costBreakdown?: CostBreakdown;
+
+  boxesQty: number;
+  boxCost: number;
+  laborPerUnit: number;
+  salePrice: number;
+  markup: number;
+  postSaleTax: number;
+
   totalCost?: number;
   unitCost?: number;
+  costBreakdown?: CostBreakdown;
+
+  createdAt?: string;
+  updatedAt?: string;
+
+  // ------------------------------------
+  // 🔹 CAMPOS EXCLUSIVOS DO BACKEND
+  // ------------------------------------
+  referenceBom?: {
+    productCode: string;
+    version: string;
+    lotSize: number;
+    validityDays: number;
+  };
+
+  bomTotals?: {
+    totalQuantity: number;
+    totalCost: number;
+    ingredients: number;
+    labor: number;
+    packaging: number;
+    taxes: number;
+    unitCost: number;
+  };
+
+  bomItems?: {
+    componentCode: string;
+    description: string;
+    quantity: number;
+    plannedQuantity: number;
+    unitCost: number;
+    plannedCost: number;
+  }[];
 }
+
+
 
 export interface ProductionStatusEvent {
   id: string;
+  name: string;
   orderId: string;
+  OP: string;
   status: ProductionStatus;
   timestamp: string;
   responsible: string;
+  authoruser?: string;
   notes?: string;
 }
 
@@ -299,8 +345,9 @@ export interface InventoryMovementPayload {
   document?: InventoryDocumentInfo;
   notes?: string;
   warehouse?: string;
-  customerOrSupplier?: number;
+  customerOrSupplier?: number | null;
   date?: string;
+  user?: string;
 }
 
 export interface InventoryMovementSummary {

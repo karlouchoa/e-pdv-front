@@ -7,12 +7,14 @@ import {
   listBoms,
   listProductionOrders,
   getBom,
+  listRawMaterials as fetchOrderRawMaterials,
 } from "@/modules/production/services/productionService";
 import {
   ProductionOrder,
   ProductionOrderPayload,
   BomRecord,
   ProductPayload,
+  OrderRawMaterial,
 } from "@/modules/core/types";
 import { SectionCard } from "@/modules/core/components/SectionCard";
 import { StatusBadge } from "@/modules/core/components/StatusBadge";
@@ -43,23 +45,24 @@ const buildInitialOrder = (): ProductionOrderPayload => {
     .slice(0, 10);
 
   return {
-    // ---- CAMPOS DO FORM PRINCIPAL ----
-    OP: "",
+    // -----------------------------
+    // 🔹 CAMPOS PRINCIPAIS
+    // -----------------------------
     productCode: "",
     quantityPlanned: 1000,
     unit: "UN",
     startDate: start,
     dueDate: due,
     externalCode: "",
-    notes: "",
+    notes: undefined,
 
     bomId: "",
     lote: null,
     validate: null,
 
-    rawMaterials: [],
-
-    // ---- NOVOS CAMPOS DO FORMULÁRIO ----
+    // -----------------------------
+    // 🔹 CUSTOS E AJUSTES
+    // -----------------------------
     boxesQty: 0,
     boxCost: 0,
     laborPerUnit: 0,
@@ -69,20 +72,10 @@ const buildInitialOrder = (): ProductionOrderPayload => {
 
     customValidateDate: null,
 
-    // ---- CAMPOS DO BLOCO BOM (vêm depois da seleção) ----
-    referenceBom: {
-      productCode: "",
-      version: "0",
-      lotSize: 0,
-      validityDays: 0,
-    },
-
-    bomTotals: {
-      totalQuantity: 0,
-      totalCost: 0,
-    },
-
-    bomItems: [],
+    // -----------------------------
+    // 🔹 RAW MATERIALS VAZIO (preenchido após selecionar BOM)
+    // -----------------------------
+    rawMaterials: [],
   };
 };
 
@@ -94,7 +87,6 @@ const calculateValidate = (startDate: string) => {
 
 const buildProductionOrderPayload = (
   form: any,
-  rawMaterials: ProductionOrderPayload["rawMaterials"],
   referenceBom: any,
   bomTotalsForPlan: any,
   {
@@ -115,54 +107,47 @@ const buildProductionOrderPayload = (
     customValidateDate: string | null;
   }
 ): ProductionOrderPayload => ({
+  // -----------------------------
+  // 🔹 CAMPOS OBRIGATÓRIOS
+  // -----------------------------
   productCode: form.productCode,
   quantityPlanned: Number(form.quantityPlanned),
   unit: form.unit,
   startDate: form.startDate,
   dueDate: form.dueDate,
-  externalCode: form.externalCode,
+  externalCode: form.externalCode?.trim() || "",
 
-  notes: form.notes?.trim() ? form.notes : undefined,
+  notes: form.notes?.trim() || undefined,
 
   bomId: form.bomId || "",
   lote: form.lote ? Number(form.lote) : null,
   validate: customValidateDate || calculateValidate(form.startDate),
 
-  rawMaterials,
-
-  // ---- NOVOS BLOCOS ----
-
-  referenceBom: {
-    productCode: referenceBom?.productCode ?? "",
-    version: referenceBom?.version ?? 0,
-    lotSize: referenceBom.lotSize,
-    validityDays: referenceBom.validityDays,
-  },
-
-  bomTotals: {
-    totalQuantity: bomTotalsForPlan.totalQuantity,
-    totalCost: bomTotalsForPlan.totalCost,
-  },
-
-  bomItems: bomTotalsForPlan.items.map((item: any) => ({
-    componentCode: item.componentCode,
-    description: item.description ?? "",
-    quantity: item.quantity,
-    plannedQuantity: item.plannedQuantity,
-    unitCost: item.unitCost ?? 0,
-    plannedCost: item.plannedCost,
-  })),
-
-  // ---- CAMPOS DO FORMULÁRIO ----
-
+  // -----------------------------
+  // 🔹 CUSTOS DO ENVIO
+  // -----------------------------
   boxesQty,
   boxCost,
   laborPerUnit,
   salePrice: salePriceValue,
   markup: markupValue,
   postSaleTax,
-
   customValidateDate,
+
+  // =====================================================
+  // 🔥 ENVIO REDUZIDO — SOMENTE rawMaterials EM VEZ DA BOM
+  // =====================================================
+  rawMaterials: bomTotalsForPlan.items.map((item: any) => ({
+    componentCode: item.componentCode,
+    description: item.description ?? "",
+    quantityUsed: item.plannedQuantity, // quantidade já escalada
+    plannedQuantity: form.quantityPlanned,
+    unit: "UN",
+    unitCost: item.unitCost ?? 0,
+    plannedCost: item.plannedCost,
+  })),
+
+
 });
 
 
@@ -507,6 +492,8 @@ export default function ProductionOrdersPage() {
       componentCode: item.componentCode,
       description: item.description,
       quantityUsed: item.quantity * form.quantityPlanned,
+      quantity: item.quantity,
+      plannedQuantity: form.quantityPlanned,
       unit: "UN",
       unitCost: item.unitCost,
     }));
@@ -552,18 +539,49 @@ export default function ProductionOrdersPage() {
       fetchBomDetails(form.bomId);
     }
   }, [fetchBomDetails, form.bomId]);
+
+  const resetFormState = () => {
+    setForm(buildInitialOrder());
+    setBomDetails(null);
+    setBomItems([]);
+    setSearchTerm("");
+    setShowSearchResults(false);
+    setBomSearch("");
+    setShowBomResults(false);
+    setBoxesQty(0);
+    setBoxCostInput("0,00");
+    setBoxCost(0);
+    setLaborPerUnitInput("0,00");
+    setLaborPerUnit(0);
+    setSalePriceInput("0,00");
+    setSalePriceValue(0);
+    setMarkupInput("0,00");
+    setMarkupValue(0);
+    setPostSaleTax(0);
+    setCustomValidateDate("");
+    setHighlightIndex(-1);
+    setRawMaterials([]);
+  };
    
    
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!session) return;
     setMessage(null);
+
+    const warehouseCode = (session.warehouse ?? "").toString().trim();
+    if (!warehouseCode) {
+      setMessage("Empresa nao encontrada na sessao. Refaca o login.");
+      return;
+    }
   
     try {
-      const rawMaterials = buildRawMaterials();
-  
+      const rawMaterials = buildRawMaterials().map((item) => ({
+        ...item,
+        warehouse: warehouseCode,
+      }));
       const validateForPayload = customValidateDate || validateDate;
-
+  
       const payload: ProductionOrderPayload = {
         productCode: form.productCode,
         quantityPlanned: form.quantityPlanned,
@@ -571,13 +589,19 @@ export default function ProductionOrdersPage() {
         startDate: form.startDate,
         dueDate: form.dueDate,
         externalCode: form.externalCode,
-        notes: form.notes && form.notes.trim() !== "" ? form.notes : undefined,
+        notes: form.notes?.trim() || undefined,
         bomId: form.bomId,
         lote: form.lote || null,
         validate: validateForPayload,
+  
+        // --------------------------
+        // 🔹 RAW MATERIALS
+        // --------------------------
         rawMaterials,
-      
-        // ---- CAMPOS NOVOS DO FORMULÁRIO ----
+  
+        // --------------------------
+        // 🔹 CAMPOS DE CUSTO
+        // --------------------------
         boxesQty,
         boxCost,
         laborPerUnit,
@@ -585,42 +609,27 @@ export default function ProductionOrdersPage() {
         markup: markupValue,
         postSaleTax,
         customValidateDate: customValidateDate || null,
-      
-        // ---- NOVOS CAMPOS DO BLOCO DE BOM ----
-        referenceBom: {
-          productCode: selectedBom?.productCode ?? "",
-          version: selectedBom?.version ?? "",  
-          lotSize: selectedBom?.lotSize ?? 0,
-          validityDays: selectedBom?.validityDays ?? 0,
-        },
-      
-        bomTotals: {
-          totalQuantity: bomTotalsForPlan.totalQuantity,
-          totalCost: bomTotalsForPlan.totalCost,
-        },
-      
-        bomItems: bomTotalsForPlan.items.map((item) => ({
-          componentCode: item.componentCode,
-          description: item.description ?? "",
-          quantity: item.quantity,
-          plannedQuantity: item.plannedQuantity,
-          unitCost: item.unitCost ?? 0,
-          plannedCost: item.plannedCost,
-        })),
+  
+        // --------------------------
+        // 🔹 AUTOR DA OP
+        // --------------------------
+        authoruser: session.user.name || "Desconhecido",
       };
-      
+  
       console.log("Payload a ser enviado:", payload);
   
       const created = await createProductionOrder(session, payload);
   
       setOrders((prev) => [created, ...prev]);
       setSelectedOrderId(created.id);
-      setForm(buildInitialOrder());
-      setMessage(`OP ${created.externalCode} criada com sucesso.`);
+      resetFormState();
+      setMessage(`OP ${created.OP} criada com sucesso.`);
+  
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "Falha ao criar OP");
     }
   };
+  
   
   const bomTotalsForPlan = useMemo(() => {
     const sourceItems = selectedBom?.items?.length
@@ -690,6 +699,11 @@ export default function ProductionOrdersPage() {
   const postSaleTaxValue = revenueTotal * ((postSaleTax || 0) / 100);
   const netRevenueTotal = revenueTotal - postSaleTaxValue;
   const profitTotal = revenueTotal - (totalWithExtras + postSaleTaxValue);
+  const [rawMaterials, setRawMaterials] = useState<OrderRawMaterial[]>([]);
+  const selectedOrderRawMaterials =
+    rawMaterials.length > 0
+      ? rawMaterials
+      : selectedOrder?.rawMaterials ?? [];
 
   const handleMarkupChange = (text: string) => {
     // 1) Mantém string original digitada
@@ -776,29 +790,356 @@ export default function ProductionOrdersPage() {
   
 
   const printOrder = () => {
-    const content = printRef.current?.innerHTML;
-    if (!content) return;
-    const popup = window.open("", "print", "width=900,height=700");
-    if (!popup) return;
-    popup.document.write(`
+    if (!selectedOrder) return;
+
+    const formatDatePrint = (value?: string) =>
+      value ? formatDate(value) : "--";
+
+    const formatNumber = (value: number | undefined | null, digits = 2) => {
+      if (value === undefined || value === null || Number.isNaN(value)) return "--";
+      return Number(value).toLocaleString("pt-BR", {
+        minimumFractionDigits: digits,
+        maximumFractionDigits: digits,
+      });
+    };
+
+    const productName =
+      items.find(
+        (item) =>
+          item.cditem === selectedOrder.productCode ||
+          item.sku === selectedOrder.productCode ||
+          item.id === selectedOrder.productCode,
+      )?.name ?? "";
+    const productDisplay = selectedOrder.productCode
+      ? `${selectedOrder.productCode}${productName ? ` - ${productName}` : ""}`
+      : "--";
+
+    const materialsForPrint = (() => {
+      if (selectedOrder.bomItems && selectedOrder.bomItems.length > 0) {
+        return selectedOrder.bomItems.map((item) => {
+          const fallbackRaw = selectedOrderRawMaterials.find(
+            (raw) => raw.componentCode === item.componentCode,
+          );
+          const plannedQty =
+            fallbackRaw?.quantityUsed ??
+            item.plannedQuantity ??
+            item.quantity ??
+            fallbackRaw?.plannedQuantity ??
+            0;
+
+          const unitCost = item.unitCost ?? fallbackRaw?.unitCost ?? 0;
+
+          return {
+            code: item.componentCode,
+            description: item.description ?? "",
+            unit: fallbackRaw?.unit ?? "UN",
+            plannedQty,
+            unitCost,
+            totalCost: item.plannedCost ?? unitCost * plannedQty,
+          };
+        });
+      }
+
+      return selectedOrderRawMaterials.map((item) => {
+        const plannedQty =
+          item.quantityUsed ?? item.plannedQuantity ?? item.quantity ?? 0;
+
+        return {
+          code: item.componentCode,
+          description: item.description ?? "",
+          unit: item.unit ?? "UN",
+          plannedQty,
+          unitCost: item.unitCost ?? 0,
+          totalCost: (item.unitCost ?? 0) * plannedQty,
+        };
+      });
+    })();
+
+    const totalMaterialsCost = materialsForPrint.reduce(
+      (acc, item) => acc + (item.totalCost ?? 0),
+      0,
+    );
+
+    const materialsRows =
+      materialsForPrint.length > 0
+        ? materialsForPrint
+            .map(
+              (item, index) => `
+            <tr>
+              <td class="cell center">${index + 1}</td>
+              <td class="cell code">${item.code}</td>
+              <td class="cell">${item.description}</td>
+              <td class="cell center">${item.unit}</td>
+              <td class="cell right">${formatNumber(item.plannedQty)}</td>
+              <td class="cell right">${formatCurrency(item.unitCost ?? 0)}</td>
+              <td class="cell right">${formatCurrency(item.totalCost ?? 0)}</td>
+            </tr>
+          `,
+            )
+            .join("")
+        : `<tr><td class="cell empty" colspan="7">Nenhum componente listado para esta OP.</td></tr>`;
+
+    const finishedGoodsRows =
+      selectedOrder.finishedGoods && selectedOrder.finishedGoods.length > 0
+        ? selectedOrder.finishedGoods
+            .map(
+              (item, index) => `
+          <tr>
+            <td class="cell center">${index + 1}</td>
+            <td class="cell">${item.productCode}</td>
+            <td class="cell">${item.lotNumber ?? "--"}</td>
+            <td class="cell right">${formatNumber(item.quantityGood)}</td>
+            <td class="cell right">${formatNumber(item.quantityScrap)}</td>
+          </tr>
+        `,
+            )
+            .join("")
+        : `<tr><td class="cell empty" colspan="5">Nenhum apontamento de produção registrado.</td></tr>`;
+
+    const requisitionRows =
+      materialsForPrint.length > 0
+        ? materialsForPrint
+            .map(
+              (item, index) => `
+            <tr>
+              <td class="cell center">${index + 1}</td>
+              <td class="cell code">${item.code}</td>
+              <td class="cell">${item.description}</td>
+              <td class="cell center">${item.unit}</td>
+              <td class="cell right">${formatNumber(item.plannedQty)}</td>
+              <td class="cell right">__________</td>
+              <td class="cell"> </td>
+            </tr>
+          `,
+            )
+            .join("")
+        : `<tr><td class="cell empty" colspan="7">Nenhum componente listado para esta OP.</td></tr>`;
+
+    const companyName =
+      session?.tenant?.enterprise || session?.tenant?.name || "Empresa";
+    const logoUrl = session?.tenant?.logoUrl;
+
+    const printHtml = `
       <html>
         <head>
-          <title>OP ${selectedOrder?.externalCode ?? ""}</title>
+          <title>OP ${selectedOrder.OP}</title>
           <style>
-            body { font-family: Arial, sans-serif; padding: 24px; }
-            table { width: 100%; border-collapse: collapse; margin-top: 16px; }
-            td, th { border: 1px solid #ccc; padding: 8px; }
+            @page { size: A4; margin: 10mm; }
+            * { box-sizing: border-box; }
+            body { font-family: Arial, sans-serif; margin: 0; padding: 0; color: #0f172a; }
+            .page { width: 100%; max-width: 210mm; margin: 0 auto 12mm; padding: 12mm 10mm; border: 2px solid #b8860b; background: #fff; }
+            .title { text-align: center; font-size: 16px; font-weight: 700; letter-spacing: 0.5px; margin-bottom: 6px; }
+            .top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+            .brand { display: flex; align-items: center; gap: 8px; }
+            .logo { width: 64px; height: 64px; object-fit: contain; border: 1px solid #d9d9d9; padding: 4px; }
+            .logo.placeholder { display: flex; align-items: center; justify-content: center; background: #f8fafc; color: #94a3b8; font-size: 12px; }
+            .brand-text { font-size: 12px; line-height: 1.3; }
+            .brand-name { font-weight: 700; }
+            .ref-box { text-align: right; font-size: 12px; line-height: 1.4; }
+            .ref-label { font-weight: 600; }
+            .info-grid { border: 1px solid #000; font-size: 11px; margin-bottom: 10px; }
+            .info-row { display: grid; grid-template-columns: 90px 1fr 80px 120px 70px 120px; border-bottom: 1px solid #000; }
+            .info-row:last-child { border-bottom: none; }
+            .info-label { background: #f1f5f9; padding: 6px; border-right: 1px solid #000; font-weight: 600; }
+            .info-value { padding: 6px; border-right: 1px solid #000; }
+            .info-row .info-value:last-child { border-right: none; }
+            .section { margin-top: 10px; }
+            .section-title { background: #f1f5f9; border: 1px solid #000; padding: 6px 8px; font-size: 12px; font-weight: 700; }
+            .table { width: 100%; border-collapse: collapse; font-size: 10.5px; }
+            .table th { background: #f8fafc; border: 1px solid #000; padding: 6px; text-align: left; }
+            .table th.center { text-align: center; }
+            .table th.right { text-align: right; }
+            .cell { border: 1px solid #000; padding: 5px 6px; }
+            .cell.center { text-align: center; }
+            .cell.right { text-align: right; }
+            .cell.code { font-family: monospace; }
+            .cell.empty { text-align: center; color: #6b7280; padding: 12px 6px; }
+            .note-box { border: 1px solid #000; min-height: 60px; padding: 8px; font-size: 11px; white-space: pre-wrap; }
+            .signature-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 24px; margin-top: 14px; }
+            .sig-block { text-align: center; font-size: 11px; }
+            .sig-line { border-bottom: 1px solid #000; height: 32px; margin-bottom: 6px; }
+            .footer { font-size: 10px; text-align: right; margin-top: 6px; color: #64748b; }
+            .break-after { page-break-after: always; }
+            .totals { font-size: 11px; margin-top: 8px; display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+            .totals-item { border: 1px solid #000; padding: 6px; background: #f8fafc; }
+            .totals-label { font-size: 10px; color: #475569; }
+            .totals-value { font-weight: 700; }
+            .req-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+            .req-title { font-size: 15px; font-weight: 700; }
           </style>
         </head>
         <body>
-          ${content}
+          <div class="page break-after">
+            <div class="top">
+              <div class="brand">
+                ${
+                  logoUrl
+                    ? `<img src="${logoUrl}" alt="Logo" class="logo" />`
+                    : `<div class="logo placeholder">LOGO</div>`
+                }
+                <div class="brand-text">
+                  <div class="brand-name">${companyName}</div>
+                  <div>ORDEM DE PRODUÇÃO</div>
+                </div>
+              </div>
+              <div class="ref-box">
+                <div><span class="ref-label">OP:</span> ${selectedOrder.OP ?? "--"}</div>
+                <div><span class="ref-label">Emitida:</span> ${formatDatePrint(selectedOrder.createdAt)}</div>
+              </div>
+            </div>
+
+            <div class="title">ORDEM DE PRODUÇÃO</div>
+
+            <div class="info-grid">
+              <div class="info-row">
+                <div class="info-label">Nº A/C</div>
+                <div class="info-value">${selectedOrder.OP || "--"}</div>
+                <div class="info-label">Prazo</div>
+                <div class="info-value">${formatDatePrint(selectedOrder.dueDate)}</div>
+                <div class="info-label">Lote</div>
+                <div class="info-value">${selectedOrder.lote ?? "--"}</div>
+              </div>
+              <div class="info-row">
+                <div class="info-label">Produto</div>
+                <div class="info-value" style="border-right: 1px solid #000;">${productDisplay}</div>
+                <div class="info-label">Qtd total</div>
+                <div class="info-value">${formatNumber(selectedOrder.quantityPlanned)} ${selectedOrder.unit}</div>
+                <div class="info-label">Validade</div>
+                <div class="info-value">${formatDatePrint(selectedOrder.dueDate)}</div>
+              </div>
+              <div class="info-row">
+                <div class="info-label">Início</div>
+                <div class="info-value">${formatDatePrint(selectedOrder.startDate)}</div>
+                <div class="info-label">Responsável</div>
+                <div class="info-value">${selectedOrder.author_user ?? session?.user.name ?? "--"}</div>
+                <div class="info-label">Status</div>
+                <div class="info-value">${selectedOrder.status ?? "--"}</div>
+              </div>
+            </div>
+
+            <div class="section">
+              <div class="section-title">Lista de materiais-prima e componentes</div>
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th class="center">#</th>
+                    <th>Código</th>
+                    <th>Descrição</th>
+                    <th class="center">Un</th>
+                    <th class="right">QTD</th>
+                    <th class="right">Custo unit.</th>
+                    <th class="right">Custo total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${materialsRows}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td class="cell right" colspan="6"><strong>Total materiais</strong></td>
+                    <td class="cell right"><strong>${formatCurrency(totalMaterialsCost)}</strong></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+
+            <div class="section">
+              <div class="section-title">Produção / apontamentos</div>
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th class="center">#</th>
+                    <th>Produto</th>
+                    <th>Lote</th>
+                    <th class="right">Qtd boa</th>
+                    <th class="right">Sucata</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${finishedGoodsRows}
+                </tbody>
+              </table>
+            </div>
+
+            <div class="totals">
+              <div class="totals-item">
+                <div class="totals-label">Custo total previsto</div>
+                <div class="totals-value">${formatCurrency(selectedOrder.totalCost ?? totalMaterialsCost)}</div>
+              </div>
+              <div class="totals-item">
+                <div class="totals-label">Custo unitário</div>
+                <div class="totals-value">${formatCurrency(selectedOrder.unitCost ?? (selectedOrder.quantityPlanned ? totalMaterialsCost / selectedOrder.quantityPlanned : 0))}</div>
+              </div>
+            </div>
+
+            <div class="section">
+              <div class="section-title">Observações</div>
+              <div class="note-box">${selectedOrder.notes ?? ""}</div>
+            </div>
+
+            <div class="signature-row">
+              <div class="sig-block">
+                <div class="sig-line"></div>
+                <div class="sig-label">Autorizado por</div>
+              </div>
+              <div class="sig-block">
+                <div class="sig-line"></div>
+                <div class="sig-label">Conferido</div>
+              </div>
+            </div>
+
+            <div class="footer">OP ${selectedOrder.OP ?? "--"} • Documento gerado em ${formatDatePrint(new Date().toISOString())}</div>
+          </div>
+
+          <div class="page">
+            <div class="req-header">
+              <div>
+                <div class="req-title">REQUISIÇÃO DE MATERIAIS-PRIMA</div>
+                <div style="font-size: 11px;">Ordem de produção: <strong>${selectedOrder.OP ?? "--"}</strong></div>
+              </div>
+              <div class="ref-box">
+                <div><span class="ref-label">Produto:</span> ${productDisplay}</div>
+                <div><span class="ref-label">Qtd:</span> ${formatNumber(selectedOrder.quantityPlanned)} ${selectedOrder.unit}</div>
+              </div>
+            </div>
+            <table class="table">
+              <thead>
+                <tr>
+                  <th class="center">#</th>
+                  <th>Código</th>
+                  <th>Descrição</th>
+                  <th class="center">Un</th>
+                  <th class="right">Qtd solicitada</th>
+                  <th class="right">Qtd entregue</th>
+                  <th>Observação</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${requisitionRows}
+              </tbody>
+            </table>
+
+            <div class="signature-row">
+              <div class="sig-block">
+                <div class="sig-line"></div>
+                <div class="sig-label">Autorizado por</div>
+              </div>
+              <div class="sig-block">
+                <div class="sig-line"></div>
+                <div class="sig-label">Recebido / Almoxarifado</div>
+              </div>
+            </div>
+          </div>
         </body>
       </html>
-    `);
+    `;
+
+    const popup = window.open("", "print", "width=900,height=700");
+    if (!popup) return;
+    popup.document.write(printHtml);
     popup.document.close();
     popup.focus();
     popup.print();
-    popup.close();
   };
 
   const loadData = useCallback(async () => {
@@ -830,9 +1171,36 @@ export default function ProductionOrdersPage() {
       }
     }, [session]);
 
+  const fetchRawMaterials = useCallback(
+    async (orderId: string) => {
+      if (!session || !orderId) return;
+      try {
+        const response = await fetchOrderRawMaterials(session, orderId);
+        setRawMaterials(response);
+        setOrders((prev) =>
+          prev.map((order) =>
+            order.id === orderId ? { ...order, rawMaterials: response } : order,
+          ),
+        );
+      } catch (error) {
+        console.error("Falha ao carregar matérias-primas da OP:", error);
+      }
+    },
+    [session],
+  );
+
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    if (!selectedOrderId) {
+      setRawMaterials([]);
+      return;
+    }
+    setRawMaterials([]);
+    fetchRawMaterials(selectedOrderId);
+  }, [fetchRawMaterials, selectedOrderId]);
 
   return (
     <div className="space-y-6">
@@ -1441,7 +1809,7 @@ export default function ProductionOrdersPage() {
               <h4 className="text-sm font-semibold text-slate-900">
                 Matérias-primas registradas
               </h4>
-              {selectedOrder.rawMaterials.length === 0 ? (
+              {selectedOrderRawMaterials.length === 0 ? (
                 <p className="text-xs text-slate-500">
                   Nenhum consumo apontado para esta OP.
                 </p>
@@ -1458,7 +1826,7 @@ export default function ProductionOrdersPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {selectedOrder.rawMaterials.map((item) => (
+                      {selectedOrderRawMaterials.map((item) => (
                         <tr key={item.id} className="border-t border-slate-100">
                           <td className="px-2 py-1 font-mono text-xs">
                             {item.componentCode}
@@ -1486,7 +1854,7 @@ export default function ProductionOrdersPage() {
                 Produtos fabricados
               </h4>
               {selectedOrder.finishedGoods.length === 0 ? (
-                <p className="text-xs text-slate-500">
+                        <p className="text-xs text-slate-500">
                   Nenhum apontamento de produção finalizado.
                 </p>
               ) : (

@@ -21,6 +21,7 @@ export interface ApiRequestConfig {
   data?: unknown;
   tenant?: string;
   token?: string;
+  warehouse?: string | null;
   headers?: Record<string, string>;
   tenantAware?: boolean;
   timeoutMs?: number;
@@ -37,6 +38,7 @@ export async function sessionRequest<T>(
     ...config,
     tenant: session.tenant.slug,
     token: session.token,
+    warehouse: session.warehouse ?? null,
   });
 }
 
@@ -66,6 +68,7 @@ export async function apiRequest<T>({
   data,
   tenant,
   token,
+  warehouse,
   headers,
   tenantAware = true,
   timeoutMs = DEFAULT_TIMEOUT,
@@ -100,6 +103,7 @@ export async function apiRequest<T>({
         "Content-Type": "application/json",
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(tenant ? { "X-Tenant": tenant } : {}),
+        ...(warehouse ? { "X-Warehouse": warehouse } : {}),
         ...headers,
       },
       body: data ? JSON.stringify(data) : undefined,
@@ -134,6 +138,13 @@ export async function apiRequest<T>({
     }
 
     return (responseBody as T) ?? ({} as T);
+  } catch (error) {
+    if ((error as Error).name === "AbortError") {
+      throw new Error(
+        `Tempo limite excedido ao contactar a API (${timeoutMs}ms).`,
+      );
+    }
+    throw error;
   } finally {
     clearTimeout(timeout);
   }

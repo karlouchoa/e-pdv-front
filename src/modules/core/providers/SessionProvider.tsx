@@ -23,6 +23,7 @@ interface SessionContextValue {
   login: (payload: LoginPayload) => Promise<SessionData>;
   logout: () => void;
   updateTenant: (data: Partial<TenantInfo>) => void;
+  updateWarehouse: (warehouse: string | null, label?: string | null) => void;
 }
 
 const SessionContext = createContext<SessionContextValue | undefined>(
@@ -103,6 +104,29 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     [persistSession, session],
   );
 
+  const updateWarehouse = useCallback(
+    (warehouse: string | null, label?: string | null) => {
+      if (!session) return;
+
+      const normalizedWarehouseValue =
+        warehouse === null || warehouse === undefined
+          ? ""
+          : String(warehouse).trim();
+      const normalizedLabelValue =
+        label === undefined
+          ? String(session.warehouseLabel ?? "").trim()
+          : String(label ?? "").trim();
+
+      const updated: SessionData = {
+        ...session,
+        warehouse: normalizedWarehouseValue || null,
+        warehouseLabel: normalizedLabelValue || null,
+      };
+      persistSession(updated);
+    },
+    [persistSession, session],
+  );
+
   const value = useMemo(
     () => ({
       session,
@@ -110,8 +134,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       login,
       logout,
       updateTenant,
+      updateWarehouse,
     }),
-    [session, isLoading, login, logout, updateTenant],
+    [session, isLoading, login, logout, updateTenant, updateWarehouse],
   );
 
   return (

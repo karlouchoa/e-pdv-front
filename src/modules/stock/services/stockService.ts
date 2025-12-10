@@ -111,6 +111,7 @@ const mapMovementToApiPayload = (payload: InventoryMovementPayload) => ({
   warehouse: payload.warehouse,
   customerOrSupplier: payload.customerOrSupplier,
   date: payload.date,
+  user: payload.user,
 });
 
 const buildQuery = (params?: Record<string, string | number | undefined>) => {

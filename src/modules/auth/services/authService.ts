@@ -1,5 +1,10 @@
 import { api } from "@/modules/core/services/api";
-import { LoginPayload, SessionData, TenantInfo } from "@/modules/core/types";
+import {
+  LoginPayload,
+  SessionData,
+  TenantInfo,
+  UserCompany,
+} from "@/modules/core/types";
 
 const AUTH_PATH = process.env.NEXT_PUBLIC_AUTH_PATH?.trim() || "/auth/login";
 
@@ -79,6 +84,66 @@ const mapApiToSession = (response: AuthApiResponse): SessionData => {
   };
 };
 
+const getStringValue = (record: Record<string, unknown>, keys: string[]) => {
+  for (const key of keys) {
+    const value = record[key];
+    if (value === undefined || value === null) continue;
+    const text = String(value).trim();
+    if (text) return text;
+  }
+  return "";
+};
+
+const normalizeCompanyRecord = (raw: unknown, index: number): UserCompany => {
+  const record = (raw ?? {}) as Record<string, unknown>;
+
+  const rawCode = getStringValue(record, [
+    "code",
+    "codigo",
+    "cdemp",
+    "empresaCodigo",
+  ]);
+  const rawName = getStringValue(record, [
+    "name",
+    "apelido",
+    "fantasia",
+    "descricao",
+    "empresa",
+  ]);
+  const id =
+    getStringValue(record, ["id", "guid", "uuid", "cdemp"]) ||
+    rawCode ||
+    rawName ||
+    `company-${index}`;
+
+  const label =
+    rawCode && rawName
+      ? `${rawCode}-${rawName}`
+      : rawName || rawCode || `Empresa ${index + 1}`;
+
+  return {
+    id,
+    code: rawCode || rawName || id,
+    name: rawName || label,
+    label,
+  };
+};
+
+const extractCompaniesArray = (payload: unknown) => {
+  if (Array.isArray(payload)) return payload;
+  if (payload && typeof payload === "object") {
+    const source = payload as Record<string, unknown>;
+    const candidates = ["data", "empresas", "companies", "items", "rows", "lista"];
+    for (const key of candidates) {
+      const value = source[key];
+      if (Array.isArray(value)) {
+        return value;
+      }
+    }
+  }
+  return [];
+};
+
 export async function authenticate(payload: LoginPayload): Promise<SessionData> {
   try {
     const { data, status } = await api.post<AuthApiResponse>(AUTH_PATH, payload, {
@@ -99,5 +164,18 @@ export async function authenticate(payload: LoginPayload): Promise<SessionData> 
       throw error;
     }
     throw new Error("Falha ao autenticar");
+  }
+}
+
+export async function fetchUserCompanies(): Promise<UserCompany[]> {
+  try {
+    const { data } = await api.get("/auth/companies_user");
+    const collection = extractCompaniesArray(data);
+    return collection.map(normalizeCompanyRecord);
+  } catch (error) {
+    if (error instanceof Error) {
+      throw error;
+    }
+    throw new Error("Falha ao carregar empresas do usuario.");
   }
 }

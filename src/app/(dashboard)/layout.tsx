@@ -14,6 +14,8 @@ const navItems = [
   { href: "/estoque/entradas", label: "Movimentação de Estoque" },
   { href: "/producao/ordens", label: "Ordens de Produção" },
   { href: "/producao/controle", label: "Controle de Produção" },
+  { href: "/producao/separacao", label: "Baixa da separação" },
+  { href: "/producao/baixa", label: "Baixa de produção" },
 ];
 
 export default function DashboardLayout({

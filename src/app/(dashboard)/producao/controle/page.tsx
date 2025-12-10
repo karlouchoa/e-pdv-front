@@ -9,6 +9,7 @@ import {
   listOrderStatusEvents,
   registerOrderStatus,
 } from "@/modules/production/services/productionService";
+import { listProducts } from "@/modules/catalog/services/catalogService";
 import {
   ProductionOrder,
   ProductionStatus,
@@ -31,13 +32,35 @@ export default function ProductionControlPage() {
   const [events, setEvents] = useState<ProductionStatusEvent[]>([]);
   const [message, setMessage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [productNamesByCode, setProductNamesByCode] = useState<Record<string, string>>({});
+
+  const getProductLabel = useCallback(
+    (order?: ProductionOrder | null) => {
+      if (!order) return undefined;
+      const productName =
+        order.productName || productNamesByCode[order.productCode];
+      return productName
+        ? `${order.productCode} - ${productName}`
+        : order.productCode;
+    },
+    [productNamesByCode],
+  );
+
+  const normalizeStatus = useCallback(
+    (value?: ProductionStatus | string | null): ProductionStatus => {
+      const normalized = (value ?? "").toString().trim().toUpperCase();
+      if (normalized === "PRODUCAO") return "PRODUCAO";
+      if (normalized === "CONCLUIDA") return "CONCLUIDA";
+      return "SEPARACAO";
+    },
+    [],
+  );
 
   const refresh = useCallback(() => {
     if (!session) return;
     setLoading(true);
     listProductionOrders(session)
       .then(async (ordersResponse) => {
-        setOrders(ordersResponse);
         const statuses = await Promise.all(
           ordersResponse.map((order) =>
             listOrderStatusEvents(session, order.id).catch(() => []),
@@ -49,14 +72,67 @@ export default function ProductionControlPage() {
             (a, b) =>
               new Date(b.timestamp).valueOf() - new Date(a.timestamp).valueOf(),
           );
+        // Usa o status mais recente registrado para cada OP
+        const latestEventByOrder = flattened.reduce(
+          (acc, event) => {
+            const current = acc[event.orderId];
+            const currentTime = current
+              ? new Date(current.timestamp).valueOf()
+              : -1;
+            const eventTime = new Date(event.timestamp).valueOf();
+            if (eventTime >= currentTime) {
+              acc[event.orderId] = event;
+            }
+            return acc;
+          },
+          {} as Record<string, ProductionStatusEvent>,
+        );
+
+        const mergedOrders = ordersResponse.map((order) => {
+          const latestEvent = latestEventByOrder[order.id];
+          const status = normalizeStatus(
+            latestEvent?.status ?? order.status ?? "SEPARACAO",
+          );
+          return latestEvent ? { ...order, status } : { ...order, status };
+        });
+
+        setOrders(mergedOrders);
         setEvents(flattened);
       })
       .finally(() => setLoading(false));
-  }, [session]);
+  }, [session, normalizeStatus]);
 
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    if (!session) return;
+    listProducts(session)
+      .then((products) => {
+        const toStringValue = (value: unknown) => {
+          if (value === null || value === undefined) return "";
+          return typeof value === "string" || typeof value === "number"
+            ? String(value)
+            : "";
+        };
+        const mapped = (products ?? []).reduce<Record<string, string>>((acc, product) => {
+          const record = product as unknown as Record<string, unknown>;
+          const code = toStringValue(
+            record.productCode ?? record.code ?? record.cditem ?? record.sku ?? "",
+          ).trim();
+          const name = toStringValue(
+            record.name ?? record.deitem ?? record.description ?? "",
+          ).trim();
+          if (code && name) {
+            acc[code] = name;
+          }
+          return acc;
+        }, {});
+        setProductNamesByCode(mapped);
+      })
+      .catch(() => undefined);
+  }, [session]);
 
   const advanceOrder = async (order: ProductionOrder) => {
     if (!session) return;
@@ -107,29 +183,38 @@ export default function ProductionControlPage() {
               <div className="space-y-3 flex-1">
                 {orders
                   .filter((order) => order.status === status)
-                  .map((order) => (
-                    <div
-                      key={order.id}
-                      className="bg-white border border-slate-200 rounded-2xl px-4 py-3 space-y-1 shadow-sm"
-                    >
-                      <p className="text-sm font-semibold text-slate-900">
-                        {order.externalCode} • {order.productCode}
-                      </p>
-                      <p className="text-xs text-slate-500">
-                        {order.quantityPlanned} {order.unit} • entrega{" "}
-                        {formatDateOrPlaceholder(order.dueDate)}
-                      </p>
-                      {status !== "CONCLUIDA" ? (
-                        <button
-                          type="button"
-                          onClick={() => advanceOrder(order)}
-                          className="text-xs font-semibold text-blue-600"
-                        >
-                          Avancar
-                        </button>
-                      ) : null}
-                    </div>
-                  ))}
+                  .map((order) => {
+                    const productName =
+                      order.productName ||
+                      productNamesByCode[order.productCode];
+                    const productLabel = productName
+                      ? `${order.productCode} - ${productName}`
+                      : order.productCode;
+                    return (
+                      <div
+                        key={order.id}
+                        className="bg-white border border-slate-200 rounded-2xl px-4 py-3 space-y-1 shadow-sm"
+                      >
+                        <p className="text-sm font-semibold text-slate-900">
+                          OP.: {order.OP || order.externalCode || order.id} -{" "}
+                          {productLabel}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          {order.quantityPlanned} {order.unit} - entrega{" "}
+                          {formatDateOrPlaceholder(order.dueDate)}
+                        </p>
+                        {status !== "CONCLUIDA" ? (
+                          <button
+                            type="button"
+                            onClick={() => advanceOrder(order)}
+                            className="text-xs font-semibold text-blue-600"
+                          >
+                            Avancar
+                          </button>
+                        ) : null}
+                      </div>
+                    );
+                  })}
               </div>
             </div>
           ))}
@@ -154,10 +239,36 @@ export default function ProductionControlPage() {
                   className="bg-white border border-slate-200 rounded-2xl px-4 py-3 flex items-center justify-between"
                 >
                   <div>
-                    <p className="text-sm font-semibold text-slate-900">
-                      OP {event.orderId.slice(0, 6)} • {event.responsible}
-                    </p>
-                    <p className="text-xs text-slate-500">{event.notes}</p>
+                    {(() => {
+                      const relatedOrder = orders.find(
+                        (order) => order.id === event.orderId,
+                      );
+                      const opCode =
+                        event.OP ||
+                        relatedOrder?.OP ||
+                        relatedOrder?.externalCode ||
+                        relatedOrder?.id ||
+                        "--";
+                      const productLabel = getProductLabel(relatedOrder);
+                      const actor =
+                        event.authoruser ||
+                        relatedOrder?.author_user ||
+                        "";
+                      return (
+                        <>
+                          <p className="text-sm font-semibold text-slate-900">
+                            OP {opCode}
+                            {productLabel ? ` - ${productLabel}` : ""}
+                          </p>
+                          <p className="text-xs text-slate-500">
+                            {actor ? `por ${actor}` : "Responsável não informado"}
+                          </p>
+                        </>
+                      );
+                    })()}
+                    {event.notes ? (
+                      <p className="text-xs text-slate-500">{event.notes}</p>
+                    ) : null}
                   </div>
                     <div className="text-right">
                       <StatusBadge status={event.status} />

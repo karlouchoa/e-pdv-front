@@ -351,7 +351,6 @@ export default function StockMovementsPage() {
   const [showWarehouseResults, setShowWarehouseResults] = useState(false);
   const [warehouseHighlightIndex, setWarehouseHighlightIndex] = useState(-1);
 
-
   const documentTypeOptions =
   movementForm.type === "E"
     ? documentTypesEntrada
@@ -517,12 +516,44 @@ export default function StockMovementsPage() {
     const handleMovementSubmit = async (event: FormEvent<HTMLFormElement>) => {
       event.preventDefault();
       if (!session) return;
+
+      const fieldLabels: Record<string, string> = {
+        itemId: "Item",
+        itemSku: "SKU do item",
+        type: "Tipo",
+        quantity: "Quantidade",
+        unitPrice: "Preço unitário",
+        documentNumber: "Número do documento",
+        documentDate: "Data do documento",
+        documentType: "Tipo do documento",
+        warehouse: "Almoxarifado/Empresa",
+        counterparty: "Cliente/Fornecedor",
+        date: "Data da movimentação",
+      };
+
+      const undefinedField = Object.entries(movementForm).find(
+        ([key, value]) => key !== "notes" && value === undefined,
+      );
+
+      if (undefinedField) {
+        const [key] = undefinedField;
+        const label = fieldLabels[key] ?? key;
+        const message = `Preencha o campo: ${label}.`;
+        setMovementMessage(message);
+        if (typeof window !== "undefined") {
+          window.alert(message);
+        }
+        return;
+      }
+
       const itemId = movementForm.itemId?.trim();
       const quantity = parsePositiveNumber(movementForm.quantity);
       if (!itemId || !quantity || quantity <= 0) {
         setMovementMessage("Informe item e quantidade válidos.");
         return;
       }
+      const customerOrSupplier = parseNumber(movementForm.counterparty) ?? null;
+      const loggedUser = session.user?.name || "usuario";
       const payload: InventoryMovementPayload = {
         itemId,
         type: movementForm.type,
@@ -540,14 +571,31 @@ export default function StockMovementsPage() {
             : undefined,
         notes: movementForm.notes || undefined,
         warehouse: movementForm.warehouse,
-        customerOrSupplier: parseNumber(movementForm.counterparty),
+        customerOrSupplier,
         date: movementForm.date || undefined,
+        user: loggedUser,
       };
+
+      // --- LOGS ADICIONADOS AQUI ---
+      console.log("ID da Empresa/Cliente/Fornecedor (customerOrSupplier):", payload.customerOrSupplier);
+      console.log("Payload COMPLETO antes de enviar:", payload);
+      // -----------------------------
+      
       setMovementMessage(null);
       try {
         const created = await createInventoryMovement(session, payload);
         setMovementMessage("Movimento registrado com sucesso.");
         setMovementForm(movementFormDefaults);
+        setSearchTerm("");
+        setShowSearchResults(false);
+        setCounterpartySearch("");
+        setCounterpartyResults([]);
+        setShowCounterpartyResults(false);
+        setCounterpartyHighlightIndex(-1);
+        setWarehouseSearch("");
+        setWarehouseResults([]);
+        setShowWarehouseResults(false);
+        setWarehouseHighlightIndex(-1);
         setMovements((prev) => [created, ...prev]);
       } catch (error) {
         setMovementMessage(

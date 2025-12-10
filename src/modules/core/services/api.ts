@@ -60,9 +60,11 @@ api.interceptors.request.use((config) => {
 
       const token = session?.token;
       const tenant = session?.tenant?.slug;
+      const warehouse = session?.warehouse;
 
       if (token) config.headers.Authorization = `Bearer ${token}`;
       if (tenant) config.headers["X-Tenant"] = tenant;
+      if (warehouse) config.headers["X-Warehouse"] = warehouse;
 
       const fullUrl = `${config.baseURL}${config.url}`;
       console.log("[AXIOS REQUEST] URL:", fullUrl);
