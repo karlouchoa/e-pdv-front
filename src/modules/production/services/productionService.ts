@@ -396,13 +396,16 @@ const mapStatusEventFromApi = (
 
 const mapCostBreakdownFromApi = (
   value?: CostBreakdownApi,
-): CostBreakdown => ({
-  ingredients: Number(value?.ingredients ?? 0),
-  labor: Number(value?.labor ?? 0),
-  packaging: Number(value?.packaging ?? 0),
-  taxes: Number(value?.taxes ?? 0),
-  overhead: Number(value?.overhead ?? 0),
-});
+): CostBreakdown | undefined => {
+  if (!value) return undefined;
+  return {
+    ingredients: Number(value?.ingredients ?? 0),
+    labor: Number(value?.labor ?? 0),
+    packaging: Number(value?.packaging ?? 0),
+    taxes: Number(value?.taxes ?? 0),
+    overhead: Number(value?.overhead ?? 0),
+  };
+};
 
 const resolveProductNameFromApi = (record: ProductionOrderApiRecord) => {
   const candidates = [
@@ -424,81 +427,119 @@ const resolveProductNameFromApi = (record: ProductionOrderApiRecord) => {
   return undefined;
 };
 
-const mapOrderFromApi = (record: ProductionOrderApiRecord): ProductionOrder => ({
-  id: record.id,
-  OP: record.OP ?? "",      
-  productCode: record.product_code ?? "",
-  productName: resolveProductNameFromApi(record),
-  author_user:
-    typeof record.author_user === "string" ? record.author_user :
-    typeof record.authoruser === "string" ? record.authoruser :
-    typeof (record as Record<string, unknown>)?.author === "string" ? String((record as Record<string, unknown>)?.author) :
-    undefined,
-  quantityPlanned: Number(record.quantity_planned ?? 0),
-  unit: record.unit ?? "UN",
-  startDate: record.start_date ?? "",
-  dueDate: record.due_date ?? "",
-  externalCode: record.external_code ?? "",
-  notes: record.notes ?? "",
-  status: record.status ?? "SEPARACAO",
-  // statusRaw preserva o valor original do backend (pode não ser parte do tipo)
-  // @ts-expect-error campo extra para diagnóstico
-  statusRaw: record.status ?? undefined,
+const mapOrderFromApi = (record: ProductionOrderApiRecord): ProductionOrder => {
+  const mappedBreakdown = mapCostBreakdownFromApi(record.cost_breakdown);
 
-  createdAt: record.created_at,
-  updatedAt: record.updated_at,
+  const toNumberOrUndefined = (value: unknown) => {
+    if (value === null || value === undefined || value === "") return undefined;
+    const parsed = Number(value);
+    return Number.isNaN(parsed) ? undefined : parsed;
+  };
 
-  finishedGoods: (record.finished_goods ?? []).map(mapFinishedGoodFromApi),
-  rawMaterials: (record.raw_materials ?? []).map(mapRawMaterialFromApi),
-  statusHistory: (record.status_history ?? []).map(mapStatusEventFromApi),
+  const fallbackBreakdown = (() => {
+    const ingredients = toNumberOrUndefined((record as Record<string, unknown>)?.ingredients);
+    const labor = toNumberOrUndefined((record as Record<string, unknown>)?.labor);
+    const packaging = toNumberOrUndefined((record as Record<string, unknown>)?.packaging);
+    const taxes = toNumberOrUndefined((record as Record<string, unknown>)?.taxes);
+    const overhead = toNumberOrUndefined(
+      (record as Record<string, unknown>)?.overhead ??
+      (record as Record<string, unknown>)?.Overhead,
+    );
 
-  // ----------------------------
-  // 🔹 CUSTOS CALCULADOS PELO BACKEND
-  // ----------------------------
-  totalCost: record.totalCost != null ? Number(record.totalCost) : 0,
-  unitCost: record.unitCost != null ? Number(record.unitCost) : 0,
+    if (
+      ingredients !== undefined ||
+      labor !== undefined ||
+      packaging !== undefined ||
+      taxes !== undefined ||
+      overhead !== undefined
+    ) {
+      return {
+        ingredients: ingredients ?? 0,
+        labor: labor ?? 0,
+        packaging: packaging ?? 0,
+        taxes: taxes ?? 0,
+        overhead: overhead ?? 0,
+      };
+    }
+    return undefined;
+  })();
 
-  // 🔹 Mantido para compatibilidade com UI
-  costBreakdown: mapCostBreakdownFromApi(record.cost_breakdown),
+  return {
+    id: record.id,
+    OP: record.OP ?? "",
+    productCode: record.product_code ?? "",
+    productName: resolveProductNameFromApi(record),
+    author_user:
+      typeof record.author_user === "string"
+        ? record.author_user
+        : typeof record.authoruser === "string"
+          ? record.authoruser
+          : typeof (record as Record<string, unknown>)?.author === "string"
+            ? String((record as Record<string, unknown>)?.author)
+            : undefined,
+    quantityPlanned: Number(record.quantity_planned ?? 0),
+    unit: record.unit ?? "UN",
+    startDate: record.start_date ?? "",
+    dueDate: record.due_date ?? "",
+    externalCode: record.external_code ?? "",
+    notes: record.notes ?? "",
+    status: record.status ?? "SEPARACAO",
+    // statusRaw preserva o valor original do backend (pode n?o ser parte do tipo)
+    // @ts-expect-error campo extra para diagn?stico
+    statusRaw: record.status ?? undefined,
 
-  // ----------------------------
-  // 🔹 CAMPOS DO FORMULÁRIO
-  // ----------------------------
-  bomId: record.bom_id ?? "",
-  boxesQty: Number(record.boxes_qty ?? 0),
-  boxCost: Number(record.box_cost ?? 0),
-  laborPerUnit: Number(record.labor_per_unit ?? 0),
-  salePrice: Number(record.sale_price ?? 0),
-  markup: Number(record.markup ?? 0),
-  postSaleTax: Number(record.post_sale_tax ?? 0),
+    createdAt: record.created_at,
+    updatedAt: record.updated_at,
 
-  lote: record.lote ?? null,
-  validate: record.validate ?? null,
-  customValidateDate: record.custom_validate_date ?? null,
+    finishedGoods: (record.finished_goods ?? []).map(mapFinishedGoodFromApi),
+    rawMaterials: (record.raw_materials ?? []).map(mapRawMaterialFromApi),
+    statusHistory: (record.status_history ?? []).map(mapStatusEventFromApi),
 
-  // ----------------------------
-  // 🔹 Dados de referência da BOM (não mais enviados pelo front)
-  // ----------------------------
-  referenceBom: {
-    productCode: record.reference_bom?.product_code ?? "",
-    version: record.reference_bom?.version ?? "",
-    lotSize: Number(record.reference_bom?.lot_size ?? 0),
-    validityDays: Number(record.reference_bom?.validity_days ?? 0),
-  },
+    // ----------------------------
+    // CUSTOS CALCULADOS PELO BACKEND
+    // ----------------------------
+    totalCost: record.totalCost != null ? Number(record.totalCost) : 0,
+    unitCost: record.unitCost != null ? Number(record.unitCost) : 0,
+    costBreakdown: mappedBreakdown ?? fallbackBreakdown,
 
-  // ----------------------------
-  // 🔹 Itens da BOM (calculados no backend)
-  // ----------------------------
-  bomItems: (record.bom_items ?? []).map((item) => ({
-    componentCode: item.component_code ?? "",
-    description: item.description ?? "",
-    quantity: Number(item.quantity ?? 0),
-    plannedQuantity: Number(item.planned_quantity ?? 0),
-    unitCost: Number(item.unit_cost ?? 0),
-    plannedCost: Number(item.planned_cost ?? 0),
-  })),
-});
+    // ----------------------------
+    // CAMPOS DO FORMUL?RIO
+    // ----------------------------
+    bomId: record.bom_id ?? "",
+    boxesQty: Number(record.boxes_qty ?? 0),
+    boxCost: Number(record.box_cost ?? 0),
+    laborPerUnit: Number(record.labor_per_unit ?? 0),
+    salePrice: Number(record.sale_price ?? 0),
+    markup: Number(record.markup ?? 0),
+    postSaleTax: Number(record.post_sale_tax ?? 0),
 
+    lote: record.lote ?? null,
+    validate: record.validate ?? null,
+    customValidateDate: record.custom_validate_date ?? null,
+
+    // ----------------------------
+    // Dados de refer?ncia da BOM (n?o mais enviados pelo front)
+    // ----------------------------
+    referenceBom: {
+      productCode: record.reference_bom?.product_code ?? "",
+      version: record.reference_bom?.version ?? "",
+      lotSize: Number(record.reference_bom?.lot_size ?? 0),
+      validityDays: Number(record.reference_bom?.validity_days ?? 0),
+    },
+
+    // ----------------------------
+    // Itens da BOM (calculados no backend)
+    // ----------------------------
+    bomItems: (record.bom_items ?? []).map((item) => ({
+      componentCode: item.component_code ?? "",
+      description: item.description ?? "",
+      quantity: Number(item.quantity ?? 0),
+      plannedQuantity: Number(item.planned_quantity ?? 0),
+      unitCost: Number(item.unit_cost ?? 0),
+      plannedCost: Number(item.planned_cost ?? 0),
+    })),
+  };
+};
 
 const mapOrderToApiPayload = (payload: ProductionOrderPayload) => ({
   external_code: payload.externalCode,
@@ -794,7 +835,7 @@ export async function createProductionOrder(
     data: mapOrderToApiPayload(payload),
   });
 
-  console.log("createProductionOrder response:", response);
+  // console.log("createProductionOrder response:", response);
   return mapOrderFromApi(response);
 }
 
@@ -818,7 +859,7 @@ export async function listProductionOrders(
     method: "GET",
   });
 
-  console.log("listProductionOrders response:", response);
+  // console.log("listProductionOrders response:", response);
   return Array.isArray(response) ? response.map(mapOrderFromApi) : [];
 }
 

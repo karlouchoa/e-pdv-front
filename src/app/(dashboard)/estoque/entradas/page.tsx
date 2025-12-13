@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useCallback, useMemo, useState } from "react";
+import { FormEvent, useEffect, useCallback, useMemo, useRef, useState } from "react";
 import { useSession } from "@/modules/core/hooks/useSession";
 import { SectionCard } from "@/modules/core/components/SectionCard";
 import { formatCurrency, formatDate } from "@/modules/core/utils/formatters";
@@ -62,6 +62,7 @@ const emptyForm: ItemFormState = {
   isRawMaterial: false,
   notes: "",
   imagePath: "",
+  qtembitem: 0, // Added qtembitem with a default value
 };
 
 const documentTypesEntrada = [
@@ -337,6 +338,7 @@ export default function StockMovementsPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [highlightIndex, setHighlightIndex] = useState(-1);
+  const lastRemoteSearch = useRef("");
   const [clientes, setClientes] = useState<ClienteRecord[]>([]);
   const [fornecedores, setFornecedores] = useState<FornecedorRecord[]>([]);
   const [empresas, setEmpresas] = useState<EmpresaRecord[]>([]);
@@ -383,16 +385,16 @@ export default function StockMovementsPage() {
       sku: getStringValue(record, ["sku", "code", "cditem", "CDITEM"], ""),
       name: getStringValue(record, ["name", "deitem", "defat"], ""),
       unit: getStringValue(record, ["unit", "unid", "undven"], "UN"),
-  
+
       // removido: category
       category: "",
-  
+
       salePrice: getNumberValue(record, ["salePrice", "preco", "preco"], 0),
       costPrice: getNumberValue(record, ["costPrice", "custo", "custlq"], 0),
       leadTimeDays: getNumberValue(record, ["leadTimeDays", "leadtime"], 0),
-  
+
       type: "acabado",
-  
+
       description: getStringValue(record, ["description", "obsitem"], ""),
       notes: getStringValue(record, ["obsitem", "notes"], ""),
       imagePath: getStringValue(record, ["locfotitem", "imagePath"], ""),
@@ -401,9 +403,10 @@ export default function StockMovementsPage() {
       cst: getStringValue(record, ["cst", "codcst"], ""),
       barcode: getStringValue(record, ["barcode", "barcodeit"], ""),
       createdAt: getStringValue(record, ["createdAt", "createdat", "datacadit"]),
-  
+
       isComposed,
       isRawMaterial,
+      qtembitem: getNumberValue(record, ["qtembitem", "QTEMBITEM"], 0), // Added qtembitem
     };
   };
   
@@ -421,7 +424,7 @@ export default function StockMovementsPage() {
           api.get("/T_EMP"),
         ]);
         
-        console.log("Resposta itens:", itemsResponse.data);
+        // console.log("Resposta itens:", itemsResponse.data);
   
         // ITENS
         const rawItems = extractArray<AnyRecord>(itemsResponse.data);
@@ -447,8 +450,8 @@ export default function StockMovementsPage() {
         //setEmpresas(rawEmpresas.map(normalizeEmpresa));
         setEmpresas(normalizedEmpresas);
         
-        console.log("Empresas carregadas:", empresasResponse.data);
-        console.log("Empresas carregadas:", rawEmpresas);
+        // console.log("Empresas carregadas:", empresasResponse.data);
+        // console.log("Empresas carregadas:", rawEmpresas);
 
       } catch (error) {
         console.error("Falha ao carregar cadastros", error);
@@ -475,6 +478,41 @@ export default function StockMovementsPage() {
         .slice(0, 10);
     }, [items, searchTerm]);
 
+    useEffect(() => {
+      const term = searchTerm.trim();
+      if (!session) return;
+      if (!term) {
+        lastRemoteSearch.current = "";
+        return;
+      }
+      if (searchResults.length > 0) return;
+      if (lastRemoteSearch.current === term) return;
+
+      const fetchByDescription = async () => {
+        lastRemoteSearch.current = term;
+        try {
+          const response = await api.get("/T_ITENS", {
+            params: { tabela: "T_ITENS", descricao: term },
+          });
+          const rawItems = extractArray<AnyRecord>(response.data);
+          const normalizedItems = rawItems.map((item, index) =>
+            normalizeItemFromApi(item, `item-search-${index}`),
+          );
+          setItems((prev) => {
+            const merged = new Map(prev.map((item) => [item.id, item]));
+            normalizedItems.forEach((item) => {
+              merged.set(item.id, item);
+            });
+            return Array.from(merged.values());
+          });
+        } catch (error) {
+          console.error("Falha ao buscar itens por descricao", error);
+        }
+      };
+
+      fetchByDescription();
+    }, [searchResults, searchTerm, session]);
+
     const handleSelectItem = (item: ItemRecord) => {
       setMovementForm((prev) => ({
         ...prev,
@@ -500,12 +538,12 @@ export default function StockMovementsPage() {
     };
 
     const handleSelectWarehouse = (item: EmpresaRecord) => {~
-      console.log("WAREHOUSE SELECIONADO:", item);
+      // console.log("WAREHOUSE SELECIONADO:", item);
       setMovementForm((prev) => ({
         ...prev,
         warehouse: item.id, 
       }));
-      console.log("Empresa do Payload:", movementForm.warehouse);  
+      // console.log("Empresa do Payload:", movementForm.warehouse);  
       setWarehouseSearch(`${item.code} - ${item.name}`);
       setShowWarehouseResults(false);
       setWarehouseHighlightIndex(-1);
@@ -577,8 +615,8 @@ export default function StockMovementsPage() {
       };
 
       // --- LOGS ADICIONADOS AQUI ---
-      console.log("ID da Empresa/Cliente/Fornecedor (customerOrSupplier):", payload.customerOrSupplier);
-      console.log("Payload COMPLETO antes de enviar:", payload);
+      // console.log("ID da Empresa/Cliente/Fornecedor (customerOrSupplier):", payload.customerOrSupplier);
+      // console.log("Payload COMPLETO antes de enviar:", payload);
       // -----------------------------
       
       setMovementMessage(null);

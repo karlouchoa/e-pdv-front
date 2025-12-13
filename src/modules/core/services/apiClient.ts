@@ -4,7 +4,12 @@ import type { SessionData } from "@/modules/core/types";
 import { SESSION_STORAGE_KEY } from "@/modules/core/constants/storage";
 
 // A URL base para requisições não-tenant-aware (ex: login)
-const DEFAULT_API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3023";
+const DEFAULT_API_URL =
+  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3023";
+
+// URL a ser usada em ambiente de desenvolvimento (npm run start:dev)
+const DEV_API_URL =
+  process.env.NEXT_PUBLIC_DEV_API_URL ?? "http://localhost:3023";
 
 // Template para montar a URL com subdomínio de tenant (ex: https://{tenant}.goldpdv.com.br)
 const TENANT_DOMAIN_TEMPLATE =
@@ -45,7 +50,14 @@ export async function sessionRequest<T>(
 const ensureLeadingSlash = (path: string) =>
   path.startsWith("/") ? path : `/${path}`;
 
+const isDevEnv = () => process.env.NODE_ENV !== "production";
+
 const buildTenantUrl = (tenant: string, path: string) => {
+  // Em desenvolvimento, sempre utiliza o backend local exposto na porta 3023
+  if (isDevEnv()) {
+    return `${DEV_API_URL}${path}`;
+  }
+
   if (!tenant) {
     throw new Error("Tenant obrigatório para chamada tenant-aware.");
   }

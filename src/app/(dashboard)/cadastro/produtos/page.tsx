@@ -1,13 +1,21 @@
 'use client';
 
 import Image from "next/image";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+import { useSearchParams } from "next/navigation";
 import { useSession } from "@/modules/core/hooks/useSession";
 import { SectionCard } from "@/modules/core/components/SectionCard";
 import type { ItemSavePayload } from "@/modules/catalog/services/catalogService";
 import { Category, ProductPayload } from "@/modules/core/types";
 import { formatDate } from "@/modules/core/utils/formatters";
 import { api } from "@/modules/core/services/api";
+import { SearchLookup, SearchOption } from "@/modules/core/components/SearchLookup";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -17,16 +25,24 @@ type ItemRecord = ProductPayload & {
   updatedAt?: string;
   isComposed: boolean;
   isRawMaterial: boolean;
+  isActive: boolean;
   notes?: string;
   imagePath?: string;
+  purchasePrice?: number;
+  markup?: number;
+  packagingQty?: number;
 };
 
 type ItemFormState = ProductPayload & {
   id: string | null;
   isComposed: boolean;
   isRawMaterial: boolean;
+  isActive: boolean;
   notes: string;
   imagePath: string;
+  purchasePrice: number;
+  markup: number;
+  packagingQty: number;
 };
 
 
@@ -36,9 +52,13 @@ const emptyForm: ItemFormState = {
   name: "",
   unit: "UN",
   category: "",
+  qtembitem: 0,
   salePrice: 0,
+  purchasePrice: 0,
   costPrice: 0,
+  markup: 0,
   leadTimeDays: 7,
+  packagingQty: 0,
   type: "acabado",
   description: "",
   ncm: "",
@@ -47,6 +67,7 @@ const emptyForm: ItemFormState = {
   barcode: "",
   isComposed: false,
   isRawMaterial: false,
+  isActive: true,
   notes: "",
   imagePath: "",
 };
@@ -98,14 +119,19 @@ function mapFormToPayload(form: any) {
     unit: form.unit,
     category: form.category,
     salePrice: Number(form.salePrice ?? 0),
+    purchasePrice: Number(form.purchasePrice ?? 0),
     costPrice: Number(form.costPrice ?? 0),
+    markup: Number(form.markup ?? 0),
     leadTimeDays: Number(form.leadTimeDays ?? 0),
+    packagingQty: Number(form.packagingQty ?? 0),
+    qtembitem: Number(form.packagingQty ?? 0),
     ncm: form.ncm,
     cest: form.cest,
     cst: form.cst,
     barcode: form.barcode,
     isComposed: Boolean(form.isComposed),
     isRawMaterial: Boolean(form.isRawMaterial),
+    isActive: Boolean(form.isActive),
     notes: form.notes,
     imagePath: form.imagePath,
     itprodsn: form.itprodsn ? "S" : "N",
@@ -131,13 +157,15 @@ const getNumberValue = (
   return fallback;
 };
 
-const stripDiacritics = (value: string) =>
-  value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
+const calculateMarkup = (cost: number, price: number) => {
+  if (cost <= 0) return 0;
+  return ((price - cost) / cost) * 100;
+};
 
-const normalizeQuery = (value: string) =>
-  stripDiacritics(value).toLowerCase();
+const calculatePriceFromMarkup = (cost: number, markup: number) => {
+  if (cost <= 0) return cost;
+  return cost * (1 + markup / 100);
+};
 
 
 const candidateKeys = [
@@ -244,8 +272,12 @@ const normalizeItemFromApi = (
     name: getStringValue(record, ["name", "deitem", "defat"], ""),
     unit: getStringValue(record, ["unit", "unid", "undven"], "UN"),
     category: categoryMatch?.code ?? categoryValue ?? "",
+    qtembitem: getNumberValue(record, ["qtembitem", "qtemb", "embalagem"], 0),
     salePrice: getNumberValue(record, ["salePrice", "preco", "preco"], 0),
+    purchasePrice: getNumberValue(record, ["purchasePrice", "valcmp", "compra"], 0),
     costPrice: getNumberValue(record, ["costPrice", "custo", "custlq"], 0),
+    packagingQty: getNumberValue(record, ["qtembitem", "qtemb", "embalagem"], 0),
+    markup: getNumberValue(record, ["markup", "margem"], 0),
     leadTimeDays: getNumberValue(record, ["leadTimeDays", "leadtime"], 0),
     type: "acabado",
     description: getStringValue(record, ["description", "obsitem"], ""),
@@ -258,55 +290,57 @@ const normalizeItemFromApi = (
     createdAt: getStringValue(record, ["createdAt", "createdat", "datacadit"]),
     isComposed,
     isRawMaterial,
+    isActive:
+      getStringValue(record, ["ativosn", "ATIVOSN"], "S").toUpperCase() === "S",
   };
 };
 
-const matchItemQuery = (item: ItemRecord, query: string) => {
-  const normalizedQuery = normalizeQuery(query.trim());
-  if (!normalizedQuery) return false;
-  const name = normalizeQuery(item.name);
-  const sku = normalizeQuery(item.sku);
-  const barcode = normalizeQuery(item.barcode ?? "");
-  return (
-    name.includes(normalizedQuery) ||
-    sku.startsWith(normalizedQuery) ||
-    barcode.startsWith(normalizedQuery)
-  );
+type ExtendedItemSavePayload = ItemSavePayload & {
+  valcmp?: number;
+  ativosn?: "S" | "N";
+  margem?: number;
+  qtembitem?: number;
 };
 
-const buildSavePayload = (form: ItemFormState): ItemSavePayload => ({
+const buildSavePayload = (form: ItemFormState): ExtendedItemSavePayload => ({
   ...form,
   id: form.id,
   notes: form.notes,
   imagePath: form.imagePath,
   itprodsn: form.isComposed ? "S" : "N",
   matprima: form.isRawMaterial ? "S" : "N",
+  valcmp: form.purchasePrice ?? 0,
+  qtembitem: form.packagingQty ?? 0,
+  ativosn: form.isActive ? "S" : "N",
+  margem: form.markup ?? 0,
 });
 
 export default function ProductsPage() {
   const { session } = useSession();
+  const searchParams = useSearchParams();
+  const prefillSearch =
+    searchParams.get("descricao") ||
+    searchParams.get("cditem") ||
+    searchParams.get("item");
   const [items, setItems] = useState<ItemRecord[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [form, setForm] = useState<ItemFormState>(emptyForm);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [showSearchResults, setShowSearchResults] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
   const [imageError, setImageError] = useState(false);
   const [imagePreviewUrl, setImagePreviewUrl] = useState("");
 
-  const loadData = useCallback(async () => {
+const loadData = useCallback(async () => {
     if (!session) return;
     setLoading(true);
     try {
+      
       const [itemsResponse, categoriesResponse] = await Promise.all([
         api.get("/T_ITENS", { params: { tabela: "T_ITENS" } }),
         api.get("/T_GRITENS"),
       ]);
       
-      console.log("Resposta itens:", itemsResponse.data);
-
       const rawCategories = extractArray<Category>(categoriesResponse.data);
       const normalizedCategories = rawCategories.map((category, index) =>
         mapCategoryMetadata(category, `cat-${index}`),
@@ -339,13 +373,6 @@ export default function ProductsPage() {
     setImageError(false);
   }, [imagePreviewUrl]);
 
-  const searchResults = useMemo(() => {
-    if (!searchTerm.trim()) return [];
-    return items
-      .filter((item) => matchItemQuery(item, searchTerm))
-      .slice(0, 10);
-  }, [items, searchTerm]);
-
   const lastItems = useMemo(() => {
     return [...items]
       .sort((a, b) => {
@@ -356,35 +383,60 @@ export default function ProductsPage() {
       .slice(0, 6);
   }, [items]);
 
-  const handleSelectItem = (item: ItemRecord) => {
-    // setForm({
-    //   ...item,
-    //   id: item.id,
-    //   isComposed: item.isComposed,
-    //   isRawMaterial: item.isRawMaterial,
-    // });
-    setForm({
-      ...item,
-      notes: item.notes ?? "",
-      imagePath: item.imagePath ?? "",
-      id: item.id,
-      isComposed: item.isComposed,
-      isRawMaterial: item.isRawMaterial,
-    });
-    setSearchTerm(item.name);
-    setShowSearchResults(false);
-    setImagePreviewUrl(item.imagePath?.trim() ?? "");
-    setImageError(false);
-  };
+const handleSelectItem = (item: ItemRecord) => {
+  // setForm({
+  //   ...item,
+  //   id: item.id,
+  //   isComposed: item.isComposed,
+  //   isRawMaterial: item.isRawMaterial,
+  // });
+  setForm({
+    ...item,
+    notes: item.notes ?? "",
+    imagePath: item.imagePath ?? "",
+    id: item.id,
+    isComposed: item.isComposed,
+    isRawMaterial: item.isRawMaterial,
+    purchasePrice: item.purchasePrice ?? 0,
+    packagingQty: item.packagingQty ?? 0,
+    isActive: item.isActive,
+    markup:
+      item.markup !== undefined
+        ? item.markup
+        : calculateMarkup(item.costPrice ?? 0, item.salePrice ?? 0),
+  });
+  setImagePreviewUrl(item.imagePath?.trim() ?? "");
+  setImageError(false);
+};
 
   const handleInputChange = (
     field: keyof ItemFormState,
     value: string | number,
   ) => {
-    setForm((prev) => ({
-      ...prev,
-      [field]: value,
-    }));
+    setForm((prev) => {
+      if (field === "costPrice") {
+        const cost = Number(value) || 0;
+        const price = prev.salePrice ?? 0;
+        const markup = calculateMarkup(cost, price);
+        return { ...prev, costPrice: cost, markup };
+      }
+      if (field === "salePrice") {
+        const price = Number(value) || 0;
+        const cost = prev.costPrice ?? 0;
+        const markup = calculateMarkup(cost, price);
+        return { ...prev, salePrice: price, markup };
+      }
+      if (field === "markup") {
+        const markup = Number(value) || 0;
+        const cost = prev.costPrice ?? 0;
+        const price = calculatePriceFromMarkup(cost, markup);
+        return { ...prev, markup, salePrice: price };
+      }
+      return {
+        ...prev,
+        [field]: value,
+      };
+    });
   };
 
   const handleCheckboxChange = (field: keyof ItemFormState) => {
@@ -421,12 +473,12 @@ export default function ProductsPage() {
       
       const payload = buildSavePayload(form);
       if (form.id) {
-        console.log("Atualizando item ID", form.id, "com payload:", payload);
+        // console.log("Atualizando item ID", form.id, "com payload:", payload);
         await api.patch(`/T_ITENS/${form.id}`, payload);
       } else {
         
         const payload = mapFormToPayload(form);
-        console.log("Criando novo item com payload:", payload);
+        // console.log("Criando novo item com payload:", payload);
         await api.post("/T_ITENS", payload);
       }
       await loadData();
@@ -435,8 +487,8 @@ export default function ProductsPage() {
       );
       if (!form.id) {
         setForm(emptyForm);
-        setSearchTerm("");
-        setShowSearchResults(false);
+      //  setSearchTerm("");
+      //  setShowSearchResults(false);
         setImagePreviewUrl("");
         setImageError(false);
       }
@@ -451,8 +503,8 @@ export default function ProductsPage() {
 
   const handleNew = () => {
     setForm(emptyForm);
-    setSearchTerm("");
-    setShowSearchResults(false);
+   // setSearchTerm("");
+   // setShowSearchResults(false);
     setFeedback(null);
     setImagePreviewUrl("");
     setImageError(false);
@@ -472,47 +524,43 @@ export default function ProductsPage() {
       >
         <div className="space-y-4">
           <div>
-            <label className="text-xs font-semibold text-slate-500">
-              Localizar item existente
-            </label>
-            <input
-              value={searchTerm}
-              onFocus={() => searchTerm.trim() && setShowSearchResults(true)}
-              onChange={(event) => {
-                setSearchTerm(event.target.value);
-                setShowSearchResults(true);
-              }}
+            <SearchLookup
+              label="Localizar item existente"
+              table="t_itens"
+              descriptionField="descricao"
+              codeField="cditem"
+              barcodeField="barcodeit"
               placeholder="Digite parte do nome, código ou código de barras"
-              className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-2"
-            />
-            {searchTerm.trim() && showSearchResults ? (
-              <div className="relative mt-2">
-                {searchResults.length > 0 ? (
-                  <div className="absolute z-10 max-h-64 w-full divide-y divide-slate-100 overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-lg">
-                    {searchResults.map((item) => (
-                      <button
-                        type="button"
-                        key={item.id}
-                        onClick={() => handleSelectItem(item)}
-                        className="w-full px-4 py-3 text-left hover:bg-blue-50 focus:bg-blue-50"
-                      >
-                        <p className="text-sm font-semibold text-slate-900">
-                          {item.name}
-                        </p>
-                        <p className="text-xs text-slate-500">
-                          SKU: {item.sku}
-                          {item.barcode ? ` • Barras: ${item.barcode}` : ""}
-                        </p>
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-slate-500">
-                    Nenhum item encontrado com os filtros informados.
+              defaultValue={prefillSearch ?? ""}
+              onSelect={(option: SearchOption) => {
+                const normalized = normalizeItemFromApi(
+                  (option.raw ?? {}) as AnyRecord,
+                  categories,
+                  option.id,
+                );
+                handleSelectItem(normalized);
+                setItems((prev) => {
+                  const existing = prev.find((item) => item.id === normalized.id);
+                  if (existing) return prev;
+                  return [normalized, ...prev];
+                });
+              }}
+              renderOption={(option, isHighlighted) => (
+                <div
+                  className={`w-full px-4 py-3 text-left ${
+                    isHighlighted ? "bg-blue-100" : "bg-white"
+                  } hover:bg-blue-50 focus:bg-blue-50`}
+                >
+                  <p className="text-sm font-semibold text-slate-900">
+                    {option.label}
                   </p>
-                )}
-              </div>
-            ) : null}
+                  <p className="text-xs text-slate-500">
+                    {option.code ? `SKU: ${option.code}` : ""}
+                    {option.barcode ? ` • Barras: ${option.barcode}` : ""}
+                  </p>
+                </div>
+              )}
+            />
           </div>
 
           <form
@@ -583,14 +631,28 @@ export default function ProductsPage() {
             </div>
             <div>
               <label className="text-xs font-semibold text-slate-500">
-                Preço de venda
+                Embalagem (qtd por embalagem)
               </label>
               <input
                 type="number"
                 step="0.01"
-                value={form.salePrice}
+                value={form.packagingQty}
                 onChange={(event) =>
-                  handleInputChange("salePrice", Number(event.target.value))
+                  handleInputChange("packagingQty", Number(event.target.value))
+                }
+                className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                Compra
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                value={form.purchasePrice}
+                onChange={(event) =>
+                  handleInputChange("purchasePrice", Number(event.target.value))
                 }
                 className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2"
               />
@@ -605,6 +667,34 @@ export default function ProductsPage() {
                 value={form.costPrice}
                 onChange={(event) =>
                   handleInputChange("costPrice", Number(event.target.value))
+                }
+                className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                Markup (%)
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                value={form.markup}
+                onChange={(event) =>
+                  handleInputChange("markup", Number(event.target.value))
+                }
+                className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-semibold text-slate-500">
+                Preço de venda
+              </label>
+              <input
+                type="number"
+                step="0.01"
+                value={form.salePrice}
+                onChange={(event) =>
+                  handleInputChange("salePrice", Number(event.target.value))
                 }
                 className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2"
               />
@@ -720,6 +810,15 @@ export default function ProductsPage() {
                   className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                 />
                 Item é matéria-prima (MATPRIMA)
+              </label>
+              <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={form.isActive}
+                  onChange={() => handleCheckboxChange("isActive")}
+                  className="h-4 w-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                />
+                Item ativo (ATIVOSN)
               </label>
             </div>
             <div className="md:col-span-2 flex flex-wrap gap-3">

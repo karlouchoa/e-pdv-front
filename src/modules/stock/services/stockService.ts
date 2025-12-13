@@ -130,7 +130,7 @@ export async function createInventoryMovement(
   payload: InventoryMovementPayload,
 ) {
   
-  console.log("Creating inventory movement with payload:", payload);
+  // console.log("Creating inventory movement with payload:", payload);
   const response = await sessionRequest<MovementApiRecord>(session, {
     path: "/inventory/movements",
     method: "POST",

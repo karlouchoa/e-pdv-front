@@ -7,9 +7,19 @@ import { ReactNode, useEffect, useState } from "react";
 import { Menu, X } from "lucide-react";
 import { useSession } from "@/modules/core/hooks/useSession";
 
-const navItems = [
+type NavItem =
+  | { href: string; label: string }
+  | { label: string; children: { href: string; label: string }[] };
+
+const navItems: NavItem[] = [
   { href: "/dashboard", label: "Painel" },
-  { href: "/cadastro/produtos", label: "Produtos & Matérias-primas" },
+  {
+    label: "Produtos & Matérias-primas",
+    children: [
+      { href: "/cadastro/produtos", label: "Cadastro" },
+      { href: "/cadastro/itens", label: "Lista" },
+    ],
+  },
   { href: "/producao/bom", label: "Composição (BOM)" },
   { href: "/estoque/entradas", label: "Movimentação de Estoque" },
   { href: "/producao/ordens", label: "Ordens de Produção" },
@@ -24,9 +34,21 @@ export default function DashboardLayout({
   children: ReactNode;
 }) {
   const { session, isLoading, logout } = useSession();
-  const router = useRouter();
   const pathname = usePathname();
+  const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(true);
+  const [openMenus, setOpenMenus] = useState<Record<string, boolean>>(() => {
+    const initial: Record<string, boolean> = {};
+    navItems.forEach((item) => {
+      if ("children" in item) {
+        const active = item.children.some((child) =>
+          pathname.startsWith(child.href),
+        );
+        if (active) initial[item.label] = true;
+      }
+    });
+    return initial;
+  });
 
   // Fecha automaticamente em telas pequenas
   useEffect(() => {
@@ -51,6 +73,7 @@ export default function DashboardLayout({
     }
   }, [isLoading, session, router, logout]);
 
+  // Submenus abrem apenas quando clicados
   if (!session || !session.tenant) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
@@ -110,8 +133,59 @@ export default function DashboardLayout({
           
         </div>
 
-        <nav className="flex-1 px-4 py-6 space-y-1 overflow-y-auto">
+        <nav className="flex-1 px-4 py-6 space-y-2 overflow-y-auto">
           {navItems.map((item) => {
+            if ("children" in item) {
+              const anyActive = item.children.some((child) =>
+                pathname.startsWith(child.href),
+              );
+              const isOpen =
+                openMenus[item.label] !== undefined
+                  ? openMenus[item.label]
+                  : false;
+              return (
+                <div key={item.label} className="space-y-1">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setOpenMenus((prev) => ({
+                        ...prev,
+                        [item.label]: !prev[item.label],
+                      }))
+                    }
+                    className={`w-full text-left px-4 py-3 rounded-xl text-sm font-semibold transition ${
+                      anyActive ? "text-blue-700" : "text-slate-700"
+                    } ${isOpen ? "bg-slate-50" : ""}`}
+                  >
+                    {item.label}
+                  </button>
+                  {isOpen ? (
+                    <div className="ml-2 space-y-1">
+                      {item.children.map((child) => {
+                        const active = pathname.startsWith(child.href);
+                        return (
+                          <Link
+                            key={child.href}
+                            href={child.href}
+                            onClick={() =>
+                              window.innerWidth < 1024 && setMenuOpen(false)
+                            }
+                            className={`block px-4 py-2 rounded-xl text-sm transition ${
+                              active
+                                ? "bg-blue-50 text-blue-700 border border-blue-100"
+                                : "text-slate-600 hover:bg-slate-50"
+                            }`}
+                          >
+                            {child.label}
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            }
+
             const active = pathname.startsWith(item.href);
             return (
               <Link

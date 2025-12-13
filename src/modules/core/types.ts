@@ -64,6 +64,7 @@ export interface ProductPayload {
   name: string;
   unit: string;
   category: string;
+  qtembitem: number;
   salePrice: number;
   costPrice: number;
   leadTimeDays: number;
@@ -172,8 +173,6 @@ export interface ProductionOrderPayload {
    
 }
 
-
-
 export interface CostBreakdown {
   ingredients: number;
   labor: number;
@@ -253,6 +252,7 @@ export interface ProductionOrder {
 
   boxesQty: number;
   boxCost: number;
+  qtembitem: number;
   laborPerUnit: number;
   salePrice: number;
   markup: number;
@@ -283,6 +283,8 @@ export interface ProductionOrder {
     packaging: number;
     taxes: number;
     unitCost: number;
+    sale_price: number;
+    quantity_planned: number;
   };
 
   bomItems?: {

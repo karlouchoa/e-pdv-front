@@ -7,7 +7,6 @@ import {
   useMemo,
   useRef,
   useState,
-  KeyboardEvent,
 } from "react";
 import { useSession } from "@/modules/core/hooks/useSession";
 import { SectionCard } from "@/modules/core/components/SectionCard";
@@ -18,7 +17,7 @@ import {
   BomRecord,
 } from "@/modules/core/types";
 import { calculateBomTotals } from "@/modules/production/utils/calc";
-import { listProducts } from "@/modules/catalog/services/catalogService";
+import { SearchLookup, SearchOption } from "@/modules/core/components/SearchLookup";
 
 import {
   // createBom,
@@ -127,14 +126,6 @@ const getNumberValue = (
   }
   return fallback;
 };
-
-const stripDiacritics = (value: string) =>
-  value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
-
-const normalizeQuery = (value: string) =>
-  stripDiacritics(value).toLowerCase();
 
 const candidateKeys = [
   "data",
@@ -328,25 +319,6 @@ const normalizeFormulaComponent = (raw: AnyRecord): BomItemPayload => {
 };
 
 
-const matchesCatalogQuery = (item: CatalogItem, normalizedTerm: string) => {
-  if (!normalizedTerm) return true;
-  const name = normalizeQuery(item.name);
-  const code = normalizeQuery(item.code);
-  return (
-    name.includes(normalizedTerm) ||
-    code.startsWith(normalizedTerm) ||
-    normalizeQuery(item.description).includes(normalizedTerm)
-  );
-};
-
-const filterByQuery = (items: CatalogItem[], search: string) => {
-  const normalizedTerm = normalizeQuery(search.trim());
-  if (!normalizedTerm) return [];
-  return items
-    .filter((item) => matchesCatalogQuery(item, normalizedTerm))
-    .slice(0, 10);
-};
-
 const buildDisplayLabel = (item: CatalogItem) =>
   `${item.code} - ${item.name}`;
 
@@ -359,21 +331,12 @@ export default function BomPage() {
   const [saving, setSaving] = useState(false);
   const [boms, setBoms] = useState<BomRecord[]>([]);
   const [feedback, setFeedback] = useState<string | null>(null);
-  const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
-  const [catalogLoading, setCatalogLoading] = useState(false);
-  const [catalogError, setCatalogError] = useState<string | null>(null);
-  const [productSearch, setProductSearch] = useState("");
-  const [materialSearch, setMaterialSearch] = useState("");
-  const [showProductResults, setShowProductResults] = useState(false);
-  const [showMaterialResults, setShowMaterialResults] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<CatalogItem | null>(
     null,
   );
   const [formulaLoading, setFormulaLoading] = useState(false);
   const [formulaError, setFormulaError] = useState<string | null>(null);
   const [formulaHasData, setFormulaHasData] = useState(false);
-  const productSearchInputRef = useRef<HTMLInputElement | null>(null);
-  const materialSearchInputRef = useRef<HTMLInputElement | null>(null);
   const quantityInputsRef = useRef<Array<HTMLInputElement | null>>([]);
   const unitCostInputsRef = useRef<Array<HTMLInputElement | null>>([]);
   const [pendingQuantityFocusIndex, setPendingQuantityFocusIndex] = useState<
@@ -396,9 +359,6 @@ export default function BomPage() {
       setPendingQuantityFocusIndex(null);
     });
   }, [items, pendingQuantityFocusIndex]);
-  const [productHighlightIndex, setProductHighlightIndex] = useState(-1);
-  const [materialHighlightIndex, setMaterialHighlightIndex] = useState(-1);
-
   
   useEffect(() => {
     if (!session) return;
@@ -408,48 +368,6 @@ export default function BomPage() {
       .catch((err) => {
         console.error("Erro ao carregar BOMs:", err);
       });
-  }, [session]);
-
-  useEffect(() => {
-    if (!session) return;
-    let cancelled = false;
-
-    const loadCatalogItems = async () => {
-      setCatalogLoading(true);
-      setCatalogError(null);
-      try {
-        const response = await listProducts(session);
-        if (cancelled) return;
-
-        // const rawItems = extractArray<AnyRecord>(response);
-        // const rawItems = Array.isArray(response) ? response : [];
-
-        const rawItems: AnyRecord[] = extractArray<AnyRecord>(response);
-
-        const normalized = rawItems
-          .map((item, index) =>
-            normalizeCatalogItem(item, `item-${index}`),
-          )
-          .filter((entry) => entry.code);
-
-
-        setCatalogItems(normalized);
-      } catch (error) {
-        if (cancelled) return;
-        setCatalogError(
-          error instanceof Error
-            ? error.message
-            : "Falha ao carregar itens.",
-        );
-      } finally {
-        if (cancelled) return;
-        setCatalogLoading(false);
-      }
-    };
-    loadCatalogItems();
-    return () => {
-      cancelled = true;
-    };
   }, [session]);
 
   useEffect(() => {
@@ -465,17 +383,17 @@ export default function BomPage() {
       setFormulaHasData(false);
       try {
 
-        console.log("🔎 Requisição listProductFormulas → payload enviado:", {
-          tenant: session?.tenant,
-          productCode: selectedProduct.code,
-        });
+        // console.log("🔎 Requisição listProductFormulas → payload enviado:", {
+        //   tenant: session?.tenant,
+        //   productCode: selectedProduct.code,
+        // });
         
         const response = await listProductFormulas(
           session,
           selectedProduct.code,
         );
 
-        console.log("🔎 Resposta do backend (BOM):", response);
+        // console.log("🔎 Resposta do backend (BOM):", response);
 
         // 1️⃣ Preencher versão no formulário
         if (response && response.version) {
@@ -495,7 +413,7 @@ export default function BomPage() {
           .map((record) => normalizeFormulaComponent(record))
           .filter((entry) => entry.componentCode || entry.description);
        
-        console.log("🔧 ITENS NORMALIZADOS QUE IRÃO PARA A TABELA:", normalized); // ⬅ AQUI
+        // console.log("🔧 ITENS NORMALIZADOS QUE IRÃO PARA A TABELA:", normalized); // ⬅ AQUI
 
         if (normalized.length > 0) {
           setItems(normalized);
@@ -536,34 +454,6 @@ export default function BomPage() {
     });
   }, [bomData, items]);
 
-  const composedItems = useMemo(
-    () => catalogItems.filter((item) => item.isComposed),
-    [catalogItems],
-  );
-
-  const rawMaterialItems = useMemo(
-    () => catalogItems.filter((item) => item.isRawMaterial),
-    [catalogItems],
-  );
-
-  const productResults = useMemo(
-    () => filterByQuery(composedItems, productSearch),
-    [composedItems, productSearch],
-  );
-
-  const rawMaterialResults = useMemo(
-    () => filterByQuery(rawMaterialItems, materialSearch),
-    [rawMaterialItems, materialSearch],
-  );
-
-  useEffect(() => {
-    setProductHighlightIndex(-1);
-  }, [productResults.length]);
-
-  useEffect(() => {
-    setMaterialHighlightIndex(-1);
-  }, [rawMaterialResults.length]);
-
   const updateItem = (
     index: number,
     field: keyof BomItemPayload,
@@ -587,9 +477,6 @@ export default function BomPage() {
     setItems((prev) => [...prev, { ...defaultItem }]);
     quantityInputsRef.current.push(null);
     unitCostInputsRef.current.push(null);
-    requestAnimationFrame(() => {
-      materialSearchInputRef.current?.focus();
-    });
   };
 
   const removeItem = (index: number) => {
@@ -600,29 +487,23 @@ export default function BomPage() {
 
   const handleSelectProduct = (item: CatalogItem) => {
     setSelectedProduct(item);
-    setProductSearch(buildDisplayLabel(item));
-    setShowProductResults(false);
 
     setBomData((prev) => ({
       ...prev,
       productCode: item.code,
     }));
-
-    requestAnimationFrame(() => {
-      materialSearchInputRef.current?.focus();
-    });
   };
 
   const populateItemFromMaterial = (material: CatalogItem) => {
 
-    console.log("📌 populateItemFromMaterial(): RECEBEU:", {
-      code: material.code,
-      description: material.description,
-      cost: material.cost,
-    });
+    // console.log("📌 populateItemFromMaterial(): RECEBEU:", {
+    //   code: material.code,
+    //   description: material.description,
+    //   cost: material.cost,
+    // });
   
     setItems((prev) => {
-      console.log("📌 Antes do update, prev items:", prev);
+      // console.log("📌 Antes do update, prev items:", prev);
   
       const next = [...prev];
       let targetIndex = next.findIndex(
@@ -646,7 +527,7 @@ export default function BomPage() {
         unitCost: material.cost,
       };
   
-      console.log("📌 Depois do update, next items:", next);
+      // console.log("📌 Depois do update, next items:", next);
   
       setPendingQuantityFocusIndex(targetIndex);
   
@@ -656,75 +537,7 @@ export default function BomPage() {
   
 
   const handleSelectMaterial = (item: CatalogItem) => {
-    setMaterialSearch(buildDisplayLabel(item));
-    setShowMaterialResults(false);
     populateItemFromMaterial(item);
-  };
-
-  const handleProductInputKeyDown = (
-    event: KeyboardEvent<HTMLInputElement>,
-  ) => {
-    if (event.key === "ArrowDown") {
-      if (!showProductResults || productResults.length === 0) return;
-      event.preventDefault();
-      setProductHighlightIndex((prev) =>
-        prev + 1 >= productResults.length ? 0 : prev + 1,
-      );
-    } else if (event.key === "ArrowUp") {
-      if (!showProductResults || productResults.length === 0) return;
-      event.preventDefault();
-      setProductHighlightIndex((prev) =>
-        prev - 1 < 0 ? productResults.length - 1 : prev - 1,
-      );
-    } else if (event.key === "Enter") {
-      event.preventDefault();
-      if (
-        showProductResults &&
-        productResults.length > 0 &&
-        productHighlightIndex >= 0
-      ) {
-        handleSelectProduct(productResults[productHighlightIndex]);
-        return;
-      }
-      if (productSearch.trim()) {
-        setProductSearch("");
-        setShowProductResults(false);
-      }
-      productSearchInputRef.current?.blur();
-    }
-  };
-
-  const handleMaterialInputKeyDown = (
-    event: KeyboardEvent<HTMLInputElement>,
-  ) => {
-    if (event.key === "ArrowDown") {
-      if (!showMaterialResults || rawMaterialResults.length === 0) return;
-      event.preventDefault();
-      setMaterialHighlightIndex((prev) =>
-        prev + 1 >= rawMaterialResults.length ? 0 : prev + 1,
-      );
-    } else if (event.key === "ArrowUp") {
-      if (!showMaterialResults || rawMaterialResults.length === 0) return;
-      event.preventDefault();
-      setMaterialHighlightIndex((prev) =>
-        prev - 1 < 0 ? rawMaterialResults.length - 1 : prev - 1,
-      );
-    } else if (event.key === "Enter") {
-      event.preventDefault();
-      if (
-        showMaterialResults &&
-        rawMaterialResults.length > 0 &&
-        materialHighlightIndex >= 0
-      ) {
-        handleSelectMaterial(rawMaterialResults[materialHighlightIndex]);
-        return;
-      }
-      if (materialSearch.trim()) {
-        setMaterialSearch("");
-        setShowMaterialResults(false);
-      }
-      materialSearchInputRef.current?.blur();
-    }
   };
 
   const handleSave = async (event: FormEvent) => {
@@ -817,7 +630,7 @@ export default function BomPage() {
       })),
     };
   
-    console.log("📦 PAYLOAD FINAL PARA O BACKEND:", payload);
+    // console.log("📦 PAYLOAD FINAL PARA O BACKEND:", payload);
   
     // -------------------------------
     // CHAMADA AXIOS DIRETA — SIMPLES
@@ -827,7 +640,7 @@ export default function BomPage() {
       const response = await api.post("/production/bom", payload);
   
       const savedBom = response.data;
-      console.log("📌 BOM salva com sucesso:", savedBom);
+      // console.log("📌 BOM salva com sucesso:", savedBom);
   
       // adiciona no topo da lista
 
@@ -929,120 +742,73 @@ export default function BomPage() {
         <div className="space-y-4 mb-6">
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div>
-              <label className="text-xs font-semibold text-slate-500">
-                Buscar produto com composição
-              </label>
-              <input
-                ref={productSearchInputRef}
-                value={productSearch}
-                onKeyDown={
-                  handleProductInputKeyDown
-                }
-                onFocus={() =>
-                  productSearch.trim() && setShowProductResults(true)
-                }
-                onChange={(event) => {
-                  setProductSearch(event.target.value);
-                  setShowProductResults(true);
-                }}
-                placeholder="Digite parte do código ou nome do produto"
-                className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2"
-              />
-              {productSearch.trim() && showProductResults ? (
-                <div className="relative mt-2">
-                  {productResults.length > 0 ? (
-                    <div className="absolute z-20 max-h-60 w-full divide-y divide-slate-100 overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-lg">
-                      {productResults.map((item) => (
-                        <button
-                          type="button"
-                          key={item.id}
-                          onClick={() => handleSelectProduct(item)}
-                          className={`w-full px-4 py-3 text-left hover:bg-blue-50 focus:bg-blue-50 ${
-                            productResults[productHighlightIndex]?.id === item.id
-                              ? "bg-blue-50"
-                              : ""
-                          }`}
-                        >
-                          <p className="text-sm font-semibold text-slate-900">
-                            {item.name}
-                          </p>
-                          <p className="text-xs text-slate-500">
-                            Código: {item.code} • Unidade: {item.unit}
-                          </p>
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="absolute z-10 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs text-slate-500">
-                      Nenhum produto encontrado.
-                    </p>
-                  )}
+            <SearchLookup
+              label="Buscar produto com composição"
+              table="t_itens"
+              descriptionField="descricao"
+              codeField="cditem"
+              barcodeField="barcodeit"
+              placeholder="Digite parte do código ou nome do produto"
+              onSelect={(option: SearchOption) => {
+                const normalized = normalizeCatalogItem(
+                  (option.raw ?? {}) as AnyRecord,
+                  option.id,
+                );
+                handleSelectProduct(normalized);
+              }}
+              renderOption={(option, isHighlighted) => (
+                <div
+                  className={`w-full px-4 py-3 text-left ${
+                    isHighlighted ? "bg-blue-100" : "bg-white"
+                  } hover:bg-blue-50 focus:bg-blue-50`}
+                >
+                  <p className="text-sm font-semibold text-slate-900">
+                    {option.label}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {option.code ? `Código: ${option.code}` : ""}
+                    {option.barcode ? ` • Barras: ${option.barcode}` : ""}
+                  </p>
                 </div>
-              ) : null}
-            </div>
-
-            <div>
-              <label className="text-xs font-semibold text-slate-500">
-                Buscar matéria-prima
-              </label>
-              <input
-                ref={materialSearchInputRef}
-                value={materialSearch}
-                onKeyDown={handleMaterialInputKeyDown}
-                onFocus={() =>
-                  materialSearch.trim() && setShowMaterialResults(true)
-                }
-                onChange={(event) => {
-                  setMaterialSearch(event.target.value);
-                  setShowMaterialResults(true);
-                }}
-                placeholder="Digite parte do código ou descrição da MP"
-                className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2"
-              />
-              {materialSearch.trim() && showMaterialResults ? (
-                <div className="relative mt-2">
-                  {rawMaterialResults.length > 0 ? (
-                    <div className="absolute z-20 max-h-60 w-full divide-y divide-slate-100 overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-lg">
-                      {rawMaterialResults.map((item) => (
-                        <button
-                          type="button"
-                          key={item.id}
-                          onClick={() => handleSelectMaterial(item)}
-                          className={`w-full px-4 py-3 text-left hover:bg-blue-50 focus:bg-blue-50 ${
-                            rawMaterialResults[materialHighlightIndex]?.id ===
-                            item.id
-                              ? "bg-blue-50"
-                              : ""
-                          }`}
-                        >
-                          <p className="text-sm font-semibold text-slate-900">
-                            {item.name}
-                          </p>
-                          <p className="text-xs text-slate-500">
-                            Código: {item.code} • Custo:{" "}
-                            {formatCurrency(item.cost)}
-                          </p>
-                        </button>
-                      ))}
-                    </div>
-                  ) : (
-                    <p className="absolute z-10 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs text-slate-500">
-                      Nenhuma matéria-prima encontrada.
-                    </p>
-                  )}
-                </div>
-              ) : null}
-            </div>
+              )}
+            />
           </div>
 
-          {catalogError ? (
-            <p className="text-xs text-red-600">{catalogError}</p>
-          ) : null}
-          {catalogLoading ? (
-            <p className="text-xs text-slate-500">
-              Carregando itens para pesquisa...
-            </p>
-          ) : null}
+          <div>
+            <label className="text-xs font-semibold text-slate-500">
+              Buscar matéria-prima
+            </label>
+            <SearchLookup
+              table="t_itens"
+              descriptionField="descricao"
+              codeField="cditem"
+              barcodeField="barcodeit"
+              placeholder="Digite parte do código ou descrição da MP"
+              onSelect={(option: SearchOption) => {
+                const normalized = normalizeCatalogItem(
+                  (option.raw ?? {}) as AnyRecord,
+                  option.id,
+                );
+                handleSelectMaterial(normalized);
+              }}
+              renderOption={(option, isHighlighted) => (
+                <div
+                  className={`w-full px-4 py-3 text-left ${
+                    isHighlighted ? "bg-blue-100" : "bg-white"
+                  } hover:bg-blue-50 focus:bg-blue-50`}
+                >
+                  <p className="text-sm font-semibold text-slate-900">
+                    {option.label}
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    {option.code ? `Código: ${option.code}` : ""}
+                    {option.barcode ? ` • Barras: ${option.barcode}` : ""}
+                  </p>
+                </div>
+              )}
+            />
+          </div>
+        </div>
 
           {selectedProduct ? (
             <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">
@@ -1315,11 +1081,6 @@ export default function BomPage() {
                           String(defaultItem.unitCost),
                         );
                       }
-                      setMaterialSearch("");
-                      setShowMaterialResults(false);
-                      requestAnimationFrame(() => {
-                        materialSearchInputRef.current?.focus();
-                      });
                     }}
                     className="w-full border border-slate-200 rounded-xl px-3 py-2 mt-1"
                   />

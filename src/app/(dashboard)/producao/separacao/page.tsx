@@ -308,14 +308,14 @@ export default function SeparationIssuePage() {
       // Busca direta pelo endpoint de OP numérica
       const detailed = await getProductionOrderByOp(session, needle);
       
-      console.log("📦 OP retornada do backend:", detailed);
+      // console.log("📦 OP retornada do backend:", detailed);
 
-      console.log("🔎 Status fields:", {
-        status: (detailed as any).status,
-        statusRaw: (detailed as any).statusRaw,
-        status_event: (detailed as any).status_event,
-        lastStatus: (detailed as any).lastStatus,
-      });
+      // console.log("🔎 Status fields:", {
+      //   status: (detailed as any).status,
+      //   statusRaw: (detailed as any).statusRaw,
+      //   status_event: (detailed as any).status_event,
+      //   lastStatus: (detailed as any).lastStatus,
+      // });
 
       const displayStatus =
         ((detailed as unknown) as Record<string, unknown>)?.statusRaw ??
@@ -327,8 +327,8 @@ export default function SeparationIssuePage() {
         `OP ${detailed.OP || detailed.externalCode || needle} está em status ${displayStatus}.`,
       );
 
-      if (displayStatus !== "SEPARACAO") {
-        const msg = `OP ${detailed.OP || detailed.externalCode || needle} está em status ${displayStatus}. Somente OPs em SEPARAÇÃO podem ser baixadas.`;
+      if (displayStatus !== "SEPARACAO" && displayStatus !== "PENDENTE") {
+        const msg = `OP ${detailed.OP || detailed.externalCode || needle} está em status ${displayStatus}. Somente OPs em SEPARAÇÃO ou PENDENTE podem ser baixadas.`;
         alert(msg);
         setMessage(msg);
         setOrder(null);

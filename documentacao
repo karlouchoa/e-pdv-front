@@ -1,0 +1,21 @@
+1) Abrir o Docker Desktop
+
+2) Criar a imagem Docker do Frontend usando variáveis de ambiente de um arquivo .env.build no PowerShell:
+docker build `
+>>   --build-arg NEXT_PUBLIC_API_URL=$(Get-Content .env.build | Select-String "^NEXT_PUBLIC_API_URL" | ForEach-Object { $_.ToString().Split("=")[1] }) `
+>>   --build-arg NEXT_PUBLIC_AUTH_PATH=$(Get-Content .env.build | Select-String "^NEXT_PUBLIC_AUTH_PATH" | ForEach-Object { $_.ToString().Split("=")[1] }) `
+>>   --build-arg NEXT_PUBLIC_TENANT_DOMAIN_TEMPLATE=$(Get-Content .env.build | Select-String "^NEXT_PUBLIC_TENANT_DOMAIN_TEMPLATE" | ForEach-Object { $_.ToString().Split("=")[1] }) `
+>>   -t karlouchoa/goldpdv-front:latest `
+>>   .
+
+3) Subir a imagem Docker para o Docker Hub:  
+docker push karlouchoa/goldpdv-front:latest
+
+4) Entrar no servidor via SSH:
+ssh -i karlouchoa_rsa user@103.199.184.26
+
+5) Entrar na pasta do projeto no servidor:
+   cd /srv/goldpdv 
+
+6) Puxar a imagem Docker mais recente do Docker Hub no servidor: 
+docker pull karlouchoa/goldpdv-front:latest

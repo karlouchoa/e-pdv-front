@@ -18,6 +18,10 @@ const nextConfig = {
       },
       {
         protocol: "https",
+        hostname: "*.goldpdv.com.br",
+      },
+      {
+        protocol: "https",
         hostname: "www.nortesoft.com.br",
       },
     ],

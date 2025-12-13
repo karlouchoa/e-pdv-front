@@ -17,8 +17,8 @@ function detectTenantBaseUrl(): string {
   if (isLocal) {
     return "http://localhost:3023";
   } else {
-    console.log("Host detectado:", host);
-    console.log("Em produção");
+    // console.log("Host detectado:", host);
+    // console.log("Em produção");
     const baseHosts = [
       "goldpdv.com.br",
       "www.goldpdv.com.br",
@@ -67,10 +67,10 @@ api.interceptors.request.use((config) => {
       if (warehouse) config.headers["X-Warehouse"] = warehouse;
 
       const fullUrl = `${config.baseURL}${config.url}`;
-      console.log("[AXIOS REQUEST] URL:", fullUrl);
+      // console.log("[AXIOS REQUEST] URL:", fullUrl);
     
       if (config.params) {
-        console.log("[AXIOS REQUEST] Params:", config.params);
+        // console.log("[AXIOS REQUEST] Params:", config.params);
       }
 
     }

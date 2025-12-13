@@ -1,7 +1,6 @@
 ﻿'use client';
 
 import { FormEvent, useEffect, useMemo, useRef, useState, useCallback } from "react";
-import { SearchLookup } from "@/modules/core/components/SearchLookup"; // Update with the correct path
 import { useSession } from "@/modules/core/hooks/useSession";
 import {
   createProductionOrder,
@@ -9,7 +8,6 @@ import {
   listProductionOrders,
   getBom,
   listRawMaterials as fetchOrderRawMaterials,
-  getProductionOrder,
 } from "@/modules/production/services/productionService";
 import {
   ProductionOrder,
@@ -17,8 +15,6 @@ import {
   BomRecord,
   ProductPayload,
   OrderRawMaterial,
-  BomItemPayload,
-  CostBreakdown,
 } from "@/modules/core/types";
 import { SectionCard } from "@/modules/core/components/SectionCard";
 import { StatusBadge } from "@/modules/core/components/StatusBadge";
@@ -36,11 +32,7 @@ type ItemRecord = ProductPayload & {
   isRawMaterial: boolean;
   notes?: string;
   imagePath?: string;
-  packagingQty?: number;
-  markup?: number;
 };
-
-type ExtraMaterial = BomItemPayload & { id: string };
 
 type AnyRecord = Record<string, unknown>;
 
@@ -54,7 +46,7 @@ const buildInitialOrder = (): ProductionOrderPayload => {
 
   return {
     // -----------------------------
-    // ƒ╣ CAMPOS PRINCIPAIS
+    // ­ƒö╣ CAMPOS PRINCIPAIS
     // -----------------------------
     productCode: "",
     quantityPlanned: 1000,
@@ -69,7 +61,7 @@ const buildInitialOrder = (): ProductionOrderPayload => {
     validate: null,
 
     // -----------------------------
-    // ƒ╣ CUSTOS E AJUSTES
+    // ­ƒö╣ CUSTOS E AJUSTES
     // -----------------------------
     boxesQty: 0,
     boxCost: 0,
@@ -81,7 +73,7 @@ const buildInitialOrder = (): ProductionOrderPayload => {
     customValidateDate: null,
 
     // -----------------------------
-    // ƒ╣ RAW MATERIALS VAZIO (preenchido ap├│s selecionar BOM)
+    // ­ƒö╣ RAW MATERIALS VAZIO (preenchido ap├│s selecionar BOM)
     // -----------------------------
     rawMaterials: [],
   };
@@ -116,7 +108,7 @@ const buildProductionOrderPayload = (
   }
 ): ProductionOrderPayload => ({
   // -----------------------------
-  // ƒ╣ CAMPOS OBRIGAT├RIOS
+  // ­ƒö╣ CAMPOS OBRIGAT├ôRIOS
   // -----------------------------
   productCode: form.productCode,
   quantityPlanned: Number(form.quantityPlanned),
@@ -132,7 +124,7 @@ const buildProductionOrderPayload = (
   validate: customValidateDate || calculateValidate(form.startDate),
 
   // -----------------------------
-  // ƒ╣ CUSTOS DO ENVIO
+  // ­ƒö╣ CUSTOS DO ENVIO
   // -----------------------------
   boxesQty,
   boxCost,
@@ -143,12 +135,12 @@ const buildProductionOrderPayload = (
   customValidateDate,
 
   // =====================================================
-  // ƒ ENVIO REDUZIDO  SOMENTE rawMaterials EM VEZ DA BOM
+  // ­ƒöÑ ENVIO REDUZIDO ÔÇö SOMENTE rawMaterials EM VEZ DA BOM
   // =====================================================
   rawMaterials: bomTotalsForPlan.items.map((item: any) => ({
     componentCode: item.componentCode,
     description: item.description ?? "",
-    quantityUsed: item.plannedQuantity, // quantidade j├ escalada
+    quantityUsed: item.plannedQuantity, // quantidade j├í escalada
     plannedQuantity: form.quantityPlanned,
     unit: "UN",
     unitCost: item.unitCost ?? 0,
@@ -298,10 +290,8 @@ const normalizeItemFromApi = (
     sku: getStringValue(record, ["sku", "code", "cditem", "CDITEM"], ""),
     name: getStringValue(record, ["name", "deitem", "defat"], ""),
     unit: getStringValue(record, ["unit", "unid", "undven"], "UN"),
-    packagingQty: getNumberValue(record, ["qtembitem", "qtemb", "embalagem"], 0),
     salePrice: getNumberValue(record, ["salePrice", "preco", "preco"], 0),
     costPrice: getNumberValue(record, ["costPrice", "custo", "custlq"], 0),
-    markup: getNumberValue(record, ["markup", "margem"], 0),
     leadTimeDays: getNumberValue(record, ["leadTimeDays", "leadtime"], 0),
     type: "acabado",
     description: getStringValue(record, ["description", "obsitem"], ""),
@@ -315,7 +305,6 @@ const normalizeItemFromApi = (
     isComposed,
     isRawMaterial,
     category: categoryValue, // Add the missing category property
-    qtembitem: getNumberValue(record, ["qtembitem"], 0), // Ensure qtembitem is included
   };
 };
 
@@ -331,7 +320,6 @@ export default function ProductionOrdersPage() {
   const [showSearchResults, setShowSearchResults] = useState(false);
   const [items, setItems] = useState<ItemRecord[]>([]);
   const [feedback, setFeedback] = useState<string | null>(null);
-  const [packagingQty, setPackagingQty] = useState(0);
 
   const [bomSearch, setBomSearch] = useState("");
   const [showBomResults, setShowBomResults] = useState(false);
@@ -339,7 +327,6 @@ export default function ProductionOrdersPage() {
 
   const [bomDetails, setBomDetails] = useState<BomRecord | null>(null);
   const [bomItems, setBomItems] = useState<BomRecord["items"]>([]);
-  const [extraMaterials, setExtraMaterials] = useState<ExtraMaterial[]>([]);
 
   const [boxesQty, setBoxesQty] = useState(0);
   
@@ -353,20 +340,20 @@ export default function ProductionOrdersPage() {
   const [salePriceInput, setSalePriceInput] = useState("0,00"); // string para exibir
   const [salePriceValue, setSalePriceValue] = useState(0);  // n├║mero real
 
-  const [markupInput, setMarkupInput] = useState("0,00");   // exibi├├o
-  const [markupValue, setMarkupValue] = useState(0);    // num├rico
+  const [markupInput, setMarkupInput] = useState("0,00");   // exibi├º├úo
+  const [markupValue, setMarkupValue] = useState(0);    // num├®rico
   const [postSaleTax, setPostSaleTax] = useState(0);
   const [customValidateDate, setCustomValidateDate] = useState<string>("");
 
   const [highlightIndex, setHighlightIndex] = useState(-1);
-  const lastFetchedOrderId = useRef<string | null>(null);
+  
 
   const printRef = useRef<HTMLDivElement>(null);
 
   const stripDiacritics = (value: string) =>
         value
           .normalize("NFD")
-          .replace(/[̀-ͯ]/g, "");
+          .replace(/[\u0300-\u036f]/g, "");
   const normalizeQuery = (value: string) =>
         stripDiacritics(value).toLowerCase();
       
@@ -402,7 +389,7 @@ export default function ProductionOrdersPage() {
         setBoms(bomResponse);
 
         if (orderResponse[0]) {
-          setSelectedOrderId(orderResponse[0].id || orderResponse[0].OP);
+          setSelectedOrderId(orderResponse[0].id);
         }
 
       }
@@ -410,32 +397,9 @@ export default function ProductionOrdersPage() {
   }, [session]);
 
   const selectedOrder =
-    orders.find(
-      (order) =>
-        order.id === selectedOrderId || order.OP === selectedOrderId,
-    ) ?? null;
+    orders.find((order) => order.id === selectedOrderId) ?? null;
 
-  const resolvedOrderFetchId = useMemo(() => {
-    const candidates = [
-      selectedOrder?.id,
-      selectedOrderId,
-      selectedOrder?.OP,
-    ].filter(Boolean) as string[];
-
-    const isUuid = (value: string) =>
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-        value,
-      );
-    const isNumeric = (value: string) => /^\d+$/.test(value);
-
-    const uuidCandidate = candidates.find(isUuid);
-    if (uuidCandidate) return uuidCandidate;
-
-    const numericCandidate = candidates.find(isNumeric);
-    if (numericCandidate) return numericCandidate;
-
-    return candidates[0] ?? null;
-  }, [selectedOrder, selectedOrderId]);
+  const selectedOrderBreakdown = selectedOrder?.costBreakdown ?? null;
 
   const availableBoms = useMemo(() => {
     if (!form.productCode.trim()) return [];
@@ -464,16 +428,6 @@ export default function ProductionOrdersPage() {
   }, [selectedBom]);
 
   useEffect(() => {
-    if (packagingQty > 0) {
-      const nextBoxes =
-        packagingQty <= 1
-          ? packagingQty
-          : Number(form.quantityPlanned || 0) / packagingQty;
-      setBoxesQty(nextBoxes);
-    }
-  }, [form.quantityPlanned, packagingQty]);
-
-  useEffect(() => {
     if (!selectedBom || form.bomId) return;
     setForm((prev) => ({
       ...prev,
@@ -484,11 +438,7 @@ export default function ProductionOrdersPage() {
 
   const previewTotals = useMemo(() => {
     const sourceItems =
-      (bomItems?.length ?? 0) > 0
-        ? bomItems
-        : selectedBom?.items?.length
-          ? selectedBom.items
-          : [];
+    selectedBom?.items?.length ? selectedBom.items : bomItems ?? [];
 
     if (!selectedBom && sourceItems.length === 0) {
       return {
@@ -536,32 +486,17 @@ export default function ProductionOrdersPage() {
     : null;
   
   const buildRawMaterials = () => {
-    const baseItems =
-      (bomItems?.length ?? 0) > 0
-        ? bomItems
-        : selectedBom?.items?.length
-          ? selectedBom.items
-          : [];
-    const combined = [...baseItems, ...extraMaterials];
-    if (!combined.length) return [];
-    const multiplier = form.quantityPlanned || 0;
-
-    return combined
-      .filter((item) => item.componentCode)
-      .map((item) => {
-        const baseQuantity = Number(item.quantity || 0);
-        const plannedQuantity = baseQuantity * multiplier;
-        return {
-          componentCode: item.componentCode,
-          description: item.description,
-          quantityUsed: plannedQuantity,
-          quantity: baseQuantity,
-          plannedQuantity: form.quantityPlanned,
-          unit: "UN",
-          unitCost: item.unitCost,
-        };
-      })
-      .filter((item) => item.quantityUsed > 0);
+    if (!selectedBom && (!bomItems || bomItems.length === 0)) return [];
+    const items = selectedBom?.items?.length ? selectedBom.items : bomItems;
+    return (items ?? []).map((item) => ({
+      componentCode: item.componentCode,
+      description: item.description,
+      quantityUsed: item.quantity * form.quantityPlanned,
+      quantity: item.quantity,
+      plannedQuantity: form.quantityPlanned,
+      unit: "UN",
+      unitCost: item.unitCost,
+    }));
   };
 
   const fetchBomDetails = useCallback(
@@ -609,8 +544,6 @@ export default function ProductionOrdersPage() {
     setForm(buildInitialOrder());
     setBomDetails(null);
     setBomItems([]);
-    setExtraMaterials([]);
-    setPackagingQty(0);
     setSearchTerm("");
     setShowSearchResults(false);
     setBomSearch("");
@@ -662,12 +595,12 @@ export default function ProductionOrdersPage() {
         validate: validateForPayload,
   
         // --------------------------
-        // ƒ╣ RAW MATERIALS
+        // ­ƒö╣ RAW MATERIALS
         // --------------------------
         rawMaterials,
   
         // --------------------------
-        // ƒ╣ CAMPOS DE CUSTO
+        // ­ƒö╣ CAMPOS DE CUSTO
         // --------------------------
         boxesQty,
         boxCost,
@@ -678,7 +611,7 @@ export default function ProductionOrdersPage() {
         customValidateDate: customValidateDate || null,
   
         // --------------------------
-        // ƒ╣ AUTOR DA OP
+        // ­ƒö╣ AUTOR DA OP
         // --------------------------
         authoruser: session.user.name || "Desconhecido",
       };
@@ -688,7 +621,7 @@ export default function ProductionOrdersPage() {
       const created = await createProductionOrder(session, payload);
   
       setOrders((prev) => [created, ...prev]);
-      setSelectedOrderId(created.id || created.OP);
+      setSelectedOrderId(created.id);
       resetFormState();
       setMessage(`OP ${created.OP} criada com sucesso.`);
   
@@ -699,18 +632,10 @@ export default function ProductionOrdersPage() {
   
   
   const bomTotalsForPlan = useMemo(() => {
-    const baseItems =
-      (bomItems?.length ?? 0) > 0
-        ? bomItems
-        : selectedBom?.items?.length
-          ? selectedBom.items
-          : [];
-    const combinedItems = [
-      ...baseItems.map((item) => ({ ...item, isExtra: false })),
-      ...extraMaterials.map((item) => ({ ...item, isExtra: true })),
-    ].filter((item) => item.componentCode);
-
-    if (!combinedItems.length) {
+    const sourceItems = selectedBom?.items?.length
+      ? selectedBom.items
+      : (bomItems ?? []);
+    if (!sourceItems.length) {
       return {
         items: [],
         totalQuantity: 0,
@@ -718,7 +643,7 @@ export default function ProductionOrdersPage() {
       };
     }
     const multiplier = form.quantityPlanned;
-    const itemsWithTotals = combinedItems.map((item) => {
+    const itemsWithTotals = sourceItems.map((item) => {
       const plannedQuantity = item.quantity * multiplier;
       const plannedCost = plannedQuantity * (item.unitCost ?? 0);
       return {
@@ -742,7 +667,7 @@ export default function ProductionOrdersPage() {
       totalQuantity,
       totalCost,
     };
-  }, [bomItems, extraMaterials, form.quantityPlanned, selectedBom]);
+  }, [bomItems, form.quantityPlanned, selectedBom]);
 
   const plannedQty = form.quantityPlanned || 0;
   const packagingCost = boxesQty * boxCost;
@@ -750,9 +675,9 @@ export default function ProductionOrdersPage() {
   const baseProductionCost = bomTotalsForPlan?.totalCost ?? 0;
   const baseUnitMpCost = plannedQty > 0 ? bomTotalsForPlan.totalCost / plannedQty : 0;
   const packagingUnitCost = plannedQty > 0 ? packagingCost / plannedQty : 0;
-  const productionUnitCost = baseProductionCost / plannedQty ; // + packagingUnitCost + laborPerUnit;
-  const totalWithExtras = (productionUnitCost * plannedQty) + packagingCost + extraLaborCost;
-  const unitCostWithExtras = totalWithExtras / plannedQty;
+  const productionUnitCost = baseUnitMpCost + packagingUnitCost + laborPerUnit;
+  const totalWithExtras = productionUnitCost * plannedQty;
+  const unitCostWithExtras = productionUnitCost;
 
   const derivedSalePrice =
     salePriceValue > 0
@@ -780,96 +705,25 @@ export default function ProductionOrdersPage() {
       ? rawMaterials
       : selectedOrder?.rawMaterials ?? [];
 
-  const selectedOrderBreakdown = useMemo<CostBreakdown | null>(() => {
-    const salePrice = Number(selectedOrder?.salePrice ?? 0);
-    const plannedQuantity = Number(selectedOrder?.quantityPlanned ?? 0);
-    const taxesPercent = Number(
-      selectedOrder?.postSaleTax ?? 0,
-    );
-
-    const computeTaxes = (fallback: number) => {
-      if (salePrice > 0 && plannedQuantity > 0) {
-        return salePrice * plannedQuantity * (taxesPercent / 100);
-      }
-      return fallback;
-    };
-
-    if (selectedOrder?.costBreakdown) {
-      return {
-        ...selectedOrder.costBreakdown,
-        taxes: computeTaxes(selectedOrder.costBreakdown.taxes ?? 0),
-      };
-    }
-
-    const bomTotals = selectedOrder?.bomTotals;
-    if (bomTotals) {
-      const ingredients = bomTotals.ingredients ?? bomTotals.totalCost ?? 0;
-      return {
-        ingredients,
-        labor: bomTotals.labor ?? ingredients * 0.12,
-        packaging: bomTotals.packaging ?? ingredients * 0.08,
-        taxes: computeTaxes(bomTotals.taxes ?? ingredients * 0.1),
-        //overhead: bomTotals.overhead ?? ingredients * 0.05,
-      } as CostBreakdown;
-    }
-
-    const sourceItems =
-      selectedOrder?.bomItems && selectedOrder.bomItems.length > 0
-        ? selectedOrder.bomItems
-        : selectedOrderRawMaterials;
-
-    if (!sourceItems || sourceItems.length === 0) {
-      return null;
-    }
-
-    let ingredients = 0;
-    for (const item of sourceItems) {
-      const plannedCost =
-        (item as any).plannedCost ??
-        (item as any).plannedcost ??
-        (item.unitCost ?? 0) *
-          ((item as any).plannedQuantity ??
-            (item as any).quantityUsed ??
-            (item as any).quantity ??
-            0);
-      if (Number.isFinite(plannedCost)) {
-        ingredients += Number(plannedCost);
-      }
-    }
-
-    const labor = ingredients * 0.12;
-    const packaging = ingredients * 0.08;
-    const taxes = computeTaxes(ingredients * 0.1);
-    const overhead = ingredients * 0.05;
-
-    return {
-      ingredients,
-      labor,
-      packaging,
-      taxes,
-      overhead,
-    };
-  }, [selectedOrder, selectedOrderRawMaterials]);
-
   const handleMarkupChange = (text: string) => {
-    // 1) Mant├m string original digitada
+    // 1) Mant├®m string original digitada
     setMarkupInput(text);
   
     // 2) Normaliza
     const normalized = text.replace(",", ".");
     const value = Number(normalized);
   
-    // 3) Se v├lido, atualiza valor num├rico
+    // 3) Se v├ílido, atualiza valor num├®rico
     if (!isNaN(value)) {
       setMarkupValue(value);
   
       if (unitCostWithExtras > 0) {
         const calculatedSalePrice = unitCostWithExtras * (1 + value / 100);
   
-        // Atualiza o valor num├rico real
+        // Atualiza o valor num├®rico real
         setSalePriceValue(calculatedSalePrice);
   
-        // Atualiza o valor exibido com v├rgula e 2 casas
+        // Atualiza o valor exibido com v├¡rgula e 2 casas
         setSalePriceInput(
           calculatedSalePrice.toFixed(2).replace(".", ",")
         );
@@ -879,14 +733,14 @@ export default function ProductionOrdersPage() {
   
 
   const handleSalePriceChange = (text: string) => {
-    // 1) Mant├m o texto digitado (preserva cursor)
+    // 1) Mant├®m o texto digitado (preserva cursor)
     setSalePriceInput(text);
   
-    // 2) Normaliza v├rgula  ponto para converter
+    // 2) Normaliza v├¡rgula ÔåÆ ponto para converter
     const normalized = text.replace(",", ".");
     const value = Number(normalized);
     
-    // 3) Se for n├║mero v├lido, calcula o markup
+    // 3) Se for n├║mero v├ílido, calcula o markup
     if (!isNaN(value)) {
       
       setSalePriceValue(value);
@@ -921,97 +775,11 @@ export default function ProductionOrdersPage() {
     }
   }
   
-  const addExtraMaterialFromItem = (item: ItemRecord) => {
-    const newMaterial: ExtraMaterial = {
-      id: item.id || item.cditem || item.sku || `extra-${Date.now()}`,
-      componentCode: item.cditem || item.sku || item.id,
-      description: item.name || item.description || "",
-      quantity: 1,
-      unitCost: item.costPrice ?? 0,
-    };
-
-    setExtraMaterials((prev) => {
-      const existingIndex = prev.findIndex(
-        (entry) => entry.componentCode === newMaterial.componentCode,
-      );
-      if (existingIndex !== -1) {
-        const copy = [...prev];
-        copy[existingIndex] = {
-          ...copy[existingIndex],
-          description: newMaterial.description || copy[existingIndex].description,
-          unitCost: newMaterial.unitCost ?? copy[existingIndex].unitCost,
-        };
-        return copy;
-      }
-      return [newMaterial, ...prev];
-    });
-  };
-
-  type SearchOption = {
-    id: string;
-    label: string;
-    code?: string;
-    barcode?: string;
-    raw?: unknown;
-  };
-
-  const handleSelectExtraMaterial = (option: SearchOption) => {
-    const normalized = normalizeItemFromApi(
-      (option.raw ?? {}) as AnyRecord,
-      `item-${option.id}`,
-    );
-    addExtraMaterialFromItem(normalized);
-  };
-
-  const updateExtraMaterial = (
-    index: number,
-    field: keyof Pick<ExtraMaterial, "quantity" | "unitCost">,
-    value: string,
-  ) => {
-    setExtraMaterials((prev) => {
-      const copy = [...prev];
-      const current = copy[index];
-      if (!current) return prev;
-      const parsed = Number(value);
-      copy[index] = {
-        ...current,
-        [field]: Number.isFinite(parsed) ? parsed : current[field],
-      };
-      return copy;
-    });
-  };
-
-  const removeExtraMaterial = (index: number) => {
-    setExtraMaterials((prev) => prev.filter((_, position) => position !== index));
-  };
-
-  const removeBaseMaterial = (index: number) => {
-    setBomItems((prev) => prev.filter((_, position) => position !== index));
-  };
-
   const handleSelectItem = (item: ItemRecord) => {
-    const selectedSalePrice = Number(item.salePrice ?? 0);
-    setSalePriceValue(selectedSalePrice);
-    setSalePriceInput(selectedSalePrice.toFixed(2).replace('.', ','));
-
-    const selectedMarkup = Number(item.markup ?? 0);
-    setMarkupValue(selectedMarkup);
-    setMarkupInput(selectedMarkup.toFixed(2).replace('.', ','));
-
-    const selectedPackaging = Number(item.packagingQty ?? 0);
-    setPackagingQty(selectedPackaging);
-    if (selectedPackaging > 0) {
-      const nextBoxes =
-        selectedPackaging <= 1
-          ? selectedPackaging
-          : Number(form.quantityPlanned || 0) / selectedPackaging;
-      setBoxesQty(nextBoxes);
-    }
-
     setForm((prev) => ({
-      ...prev,                          // mant?m tudo que j? existe
+      ...prev,                          // mant├®m tudo que j├í existe
       productCode: item.cditem,        // codigo do produto
-      notes: item.notes ?? "",         // notas pr?-existentes
+      notes: item.notes ?? "",         // notas pr├®-existentes
       isComposed: item.isComposed,
       isRawMaterial: item.isRawMaterial,
     }));
@@ -1126,7 +894,7 @@ export default function ProductionOrdersPage() {
         `,
             )
             .join("")
-        : `<tr><td class="cell empty" colspan="5">Nenhum apontamento de produção registrado.</td></tr>`;
+        : `<tr><td class="cell empty" colspan="5">Nenhum apontamento de produ├º├úo registrado.</td></tr>`;
 
     const requisitionRows =
       materialsForPrint.length > 0
@@ -1211,9 +979,8 @@ export default function ProductionOrdersPage() {
                 }
                 <div class="brand-text">
                   <div class="brand-name">${companyName}</div>
-                  <div>ORDEM DE PRODUÇÃO</div>
-                  </div>
-                </form>
+                  <div>ORDEM DE PRODU├ç├âO</div>
+                </div>
               </div>
               <div class="ref-box">
                 <div><span class="ref-label">OP:</span> ${selectedOrder.OP ?? "--"}</div>
@@ -1221,11 +988,11 @@ export default function ProductionOrdersPage() {
               </div>
             </div>
 
-            <div class="title">ORDEM DE PRODUÇÃO</div>
+            <div class="title">ORDEM DE PRODU├ç├âO</div>
 
             <div class="info-grid">
               <div class="info-row">
-                <div class="info-label">Nº A/C</div>
+                <div class="info-label">N┬║ A/C</div>
                 <div class="info-value">${selectedOrder.OP || "--"}</div>
                 <div class="info-label">Prazo</div>
                 <div class="info-value">${formatDatePrint(selectedOrder.dueDate)}</div>
@@ -1241,9 +1008,9 @@ export default function ProductionOrdersPage() {
                 <div class="info-value">${formatDatePrint(selectedOrder.dueDate)}</div>
               </div>
               <div class="info-row">
-                <div class="info-label">Início</div>
+                <div class="info-label">In├¡cio</div>
                 <div class="info-value">${formatDatePrint(selectedOrder.startDate)}</div>
-                <div class="info-label">Responsável</div>
+                <div class="info-label">Respons├ível</div>
                 <div class="info-value">${selectedOrder.author_user ?? session?.user.name ?? "--"}</div>
                 <div class="info-label">Status</div>
                 <div class="info-value">${selectedOrder.status ?? "--"}</div>
@@ -1256,8 +1023,8 @@ export default function ProductionOrdersPage() {
                 <thead>
                   <tr>
                     <th class="center">#</th>
-                    <th>Código</th>
-                    <th>Descrição</th>
+                    <th>C├│digo</th>
+                    <th>Descri├º├úo</th>
                     <th class="center">Un</th>
                     <th class="right">QTD</th>
                     <th class="right">Custo unit.</th>
@@ -1277,7 +1044,7 @@ export default function ProductionOrdersPage() {
             </div>
 
             <div class="section">
-              <div class="section-title">Produção / apontamentos</div>
+              <div class="section-title">Produ├º├úo / apontamentos</div>
               <table class="table">
                 <thead>
                   <tr>
@@ -1300,13 +1067,13 @@ export default function ProductionOrdersPage() {
                 <div class="totals-value">${formatCurrency(selectedOrder.totalCost ?? totalMaterialsCost)}</div>
               </div>
               <div class="totals-item">
-                <div class="totals-label">Custo unitário</div>
+                <div class="totals-label">Custo unit├írio</div>
                 <div class="totals-value">${formatCurrency(selectedOrder.unitCost ?? (selectedOrder.quantityPlanned ? totalMaterialsCost / selectedOrder.quantityPlanned : 0))}</div>
               </div>
             </div>
 
             <div class="section">
-              <div class="section-title">Observações</div>
+              <div class="section-title">Observa├º├Áes</div>
               <div class="note-box">${selectedOrder.notes ?? ""}</div>
             </div>
 
@@ -1321,14 +1088,14 @@ export default function ProductionOrdersPage() {
               </div>
             </div>
 
-            <div class="footer">OP ${selectedOrder.OP ?? "--"}  Documento gerado em ${formatDatePrint(new Date().toISOString())}</div>
+            <div class="footer">OP ${selectedOrder.OP ?? "--"} ÔÇó Documento gerado em ${formatDatePrint(new Date().toISOString())}</div>
           </div>
 
           <div class="page">
             <div class="req-header">
               <div>
-                <div class="req-title">REQUISIÇÃO DE MATERIAIS-PRIMA</div>
-                <div style="font-size: 11px;">Ordem de produção: <strong>${selectedOrder.OP ?? "--"}</strong></div>
+                <div class="req-title">REQUISI├ç├âO DE MATERIAIS-PRIMA</div>
+                <div style="font-size: 11px;">Ordem de produ├º├úo: <strong>${selectedOrder.OP ?? "--"}</strong></div>
               </div>
               <div class="ref-box">
                 <div><span class="ref-label">Produto:</span> ${productDisplay}</div>
@@ -1339,12 +1106,12 @@ export default function ProductionOrdersPage() {
               <thead>
                 <tr>
                   <th class="center">#</th>
-                  <th>Código</th>
-                  <th>Descrição</th>
+                  <th>C├│digo</th>
+                  <th>Descri├º├úo</th>
                   <th class="center">Un</th>
                   <th class="right">Qtd solicitada</th>
                   <th class="right">Qtd entregue</th>
-                  <th>Observação</th>
+                  <th>Observa├º├úo</th>
                 </tr>
               </thead>
               <tbody>
@@ -1405,20 +1172,18 @@ export default function ProductionOrdersPage() {
     }, [session]);
 
   const fetchRawMaterials = useCallback(
-    async (orderKey: string) => {
-      if (!session || !orderKey) return;
+    async (orderId: string) => {
+      if (!session || !orderId) return;
       try {
-        const response = await fetchOrderRawMaterials(session, orderKey);
+        const response = await fetchOrderRawMaterials(session, orderId);
         setRawMaterials(response);
         setOrders((prev) =>
           prev.map((order) =>
-            order.id === orderKey || order.OP === orderKey
-              ? { ...order, rawMaterials: response }
-              : order,
+            order.id === orderId ? { ...order, rawMaterials: response } : order,
           ),
         );
       } catch (error) {
-        console.error("Falha ao carregar mat?rias-primas da OP:", error);
+        console.error("Falha ao carregar mat├®rias-primas da OP:", error);
       }
     },
     [session],
@@ -1428,49 +1193,14 @@ export default function ProductionOrdersPage() {
     loadData();
   }, [loadData]);
 
-  const fetchOrderDetails = useCallback(
-    async (orderKey: string) => {
-      if (!session || !orderKey) return;
-      try {
-        const detail = await getProductionOrder(session, orderKey);
-        setOrders((prev) => {
-          const index = prev.findIndex(
-            (order) => order.id === orderKey || order.OP === orderKey,
-          );
-          if (index === -1) return [detail, ...prev];
-          const copy = [...prev];
-          copy[index] = detail;
-          return copy;
-        });
-      } catch (error) {
-        console.error("Falha ao carregar detalhes da OP:", error);
-      }
-    },
-    [session],
-  );
-
   useEffect(() => {
-    if (!selectedOrderId && !resolvedOrderFetchId) {
+    if (!selectedOrderId) {
       setRawMaterials([]);
-      lastFetchedOrderId.current = null;
       return;
     }
-
-    if (!resolvedOrderFetchId) {
-      setRawMaterials(selectedOrder?.rawMaterials ?? []);
-      return;
-    }
-
-    if (lastFetchedOrderId.current === resolvedOrderFetchId) {
-      return;
-    }
-
-    lastFetchedOrderId.current = resolvedOrderFetchId;
     setRawMaterials([]);
-    fetchOrderDetails(resolvedOrderFetchId);
-    fetchRawMaterials(resolvedOrderFetchId);
-  }, [fetchOrderDetails, fetchRawMaterials, resolvedOrderFetchId, selectedOrderId, selectedOrder]);
-
+    fetchRawMaterials(selectedOrderId);
+  }, [fetchRawMaterials, selectedOrderId]);
 
   return (
     <div className="space-y-6">
@@ -1480,8 +1210,8 @@ export default function ProductionOrdersPage() {
         </div>
       ) : null}
       <SectionCard
-        title="Nova Ordem de Produção"
-        description="Dispara cálculo de custo, baixa estoque e libera requisições"
+        title="Nova Ordem de Producao"
+        description="Dispara calculo de custo, baixa estoque e libera requisicoes"
         action={
           <button
             type="button"
@@ -1489,7 +1219,7 @@ export default function ProductionOrdersPage() {
             disabled={!selectedOrder}
             className="text-sm font-semibold text-slate-600"
           >
-            Imprimir requisição
+            Imprimir requisicao
           </button>
         }
       >
@@ -1498,44 +1228,77 @@ export default function ProductionOrdersPage() {
             <label className="text-xs font-semibold text-slate-500">
               Produto
             </label>
-                        <SearchLookup
-              table="t_itens"
-              descriptionField="descricao"
-              codeField="cditem"
-              barcodeField="barcodeit"
-              placeholder="Digite parte do nome, codigo ou codigo de barras"
-              onSelect={(option: SearchOption) => {
-                const normalized = normalizeItemFromApi(
-                  (option.raw ?? {}) as AnyRecord,
-                  `item-${option.id}`,
-                );
-                handleSelectItem(normalized);
-                setItems((prev) => {
-                  const exists = prev.find((entry) => entry.id === normalized.id);
-                  return exists ? prev : [normalized, ...prev];
-                });
+            <input
+              value={searchTerm}
+              onFocus={() => searchTerm.trim() && setShowSearchResults(true)}
+              onChange={(event) => {
+                setSearchTerm(event.target.value);
+                setShowSearchResults(true);
+                setHighlightIndex(-1); // reset
               }}
-              renderOption={(option, isHighlighted) => (
-                <div
-                  className={`w-full px-4 py-3 text-left ${
-                    isHighlighted ? "bg-blue-100" : "bg-white"
-                  } hover:bg-blue-50 focus:bg-blue-50`}
-                >
-                  <p className="text-sm font-semibold text-slate-900">
-                    {option.label}
-                  </p>
-                  <p className="text-xs text-slate-500">
-                    {option.code ? `SKU: ${option.code}` : ""}
-                    {option.barcode ? ` | Barras: ${option.barcode}` : ""}
-                  </p>
-                </div>
-              )}
+              onKeyDown={(event) => {
+                if (!showSearchResults || searchResults.length === 0) return;
+
+                if (event.key === "ArrowDown") {
+                  event.preventDefault();
+                  setHighlightIndex((prev) =>
+                    prev < searchResults.length - 1 ? prev + 1 : prev
+                  );
+                }
+
+                if (event.key === "ArrowUp") {
+                  event.preventDefault();
+                  setHighlightIndex((prev) => (prev > 0 ? prev - 1 : prev));
+                }
+
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  if (highlightIndex >= 0) {
+                    handleSelectItem(searchResults[highlightIndex]);
+                  }
+                }
+
+                if (event.key === "Escape") {
+                  setShowSearchResults(false);
+                }
+              }}
+              placeholder="Digite parte do nome, c├│digo ou c├│digo de barras"
+              className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-2"
             />
 
+            {searchTerm.trim() && showSearchResults ? (
+              <div className="relative mt-2">
+                {searchResults.length > 0 ? (
+                  <div className="absolute z-10 max-h-64 w-full divide-y divide-slate-100 overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-lg">
+                    {searchResults.map((item, index) => (
+                      <button
+                        type="button"
+                        key={item.id}
+                        onClick={() => handleSelectItem(item)}
+                        className={`w-full px-4 py-3 text-left 
+                          ${index === highlightIndex ? "bg-blue-50" : "hover:bg-blue-50"}`} 
+                      >
+                        <p className="text-sm font-semibold text-slate-900">
+                          {item.name}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          SKU: {item.sku}
+                          {item.barcode ? ` ÔÇó Barras: ${item.barcode}` : ""}
+                        </p>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-xs text-slate-500">
+                    Nenhum item encontrado com os filtros informados.
+                  </p>
+                )}
+              </div>
+            ) : null}
           </div>
           <div>
             <label className="text-xs font-semibold text-slate-500">
-              Versão da Ficha Técnica
+              Vers├úo da Ficha T├®cnica
             </label>
             <select
               value={form.bomId}
@@ -1545,7 +1308,7 @@ export default function ProductionOrdersPage() {
               <option value="">Selecione</option>
               {availableBoms.map((bom) => (
                 <option key={bom.id} value={bom.id}>
-                  Versão {bom.version} 
+                  Versao {bom.version} 
                 </option>
               ))}
             </select>
@@ -1663,7 +1426,7 @@ export default function ProductionOrdersPage() {
             </div>
             <div>
               <label className="text-xs font-semibold text-slate-500">
-                Mão de obra por unidade
+                M├úo de obra por unidade
               </label>
               <input
                 type="text"
@@ -1680,11 +1443,11 @@ export default function ProductionOrdersPage() {
           <div className="md:col-span-3 grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="text-xs font-semibold text-slate-500">
-                Preço unitário de venda
+                Pre├ºo unit├írio de venda
               </label>
               <input
                 type="text"
-                inputMode="decimal"   
+                inputMode="decimal"   // mostra teclado num├®rico no mobile
                 value={salePriceInput}
                 onChange={(e) => handleSalePriceChange(e.target.value)}
                 onBlur={() => {
@@ -1710,7 +1473,7 @@ export default function ProductionOrdersPage() {
             </div>
             <div>
               <label className="text-xs font-semibold text-slate-500">
-                Impostos pós-venda (%)
+                Impostos p├│s-venda (%)
               </label>
               <input
                 type="number"
@@ -1724,7 +1487,7 @@ export default function ProductionOrdersPage() {
           </div>
           <div className="md:col-span-3">
             <label className="text-xs font-semibold text-slate-500">
-              Observações
+              Observacoes
             </label>
             <textarea
               value={form.notes}
@@ -1735,58 +1498,16 @@ export default function ProductionOrdersPage() {
             />
           </div>
 
-          {selectedBom || extraMaterials.length > 0 ? (
+          {selectedBom ? (
             <div className="md:col-span-3 space-y-3">
-              <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <p className="text-xs uppercase text-slate-500">Adicionar matéria-prima</p>
-                  <p className="text-xs text-slate-500">
-                    Itens extras entram direto na ficha técnica e nos c?lculos da OP.
-                  </p>
-                </div>
-                {extraMaterials.length > 0 ? (
-                  <button
-                    type="button"
-                    onClick={() => setExtraMaterials([])}
-                    className="text-xs font-semibold text-red-600"
-                  >
-                    Limpar extras
-                  </button>
-                ) : null}
-              </div>
-
-              <SearchLookup
-                table="t_itens"
-                descriptionField="descricao"
-                codeField="cditem"
-                barcodeField="barcodeit"
-                placeholder="Buscar e incluir MP adicional"
-                onSelect={handleSelectExtraMaterial}
-                renderOption={(option: SearchOption, isHighlighted: boolean) => (
-                  <div
-                    className={`w-full px-4 py-3 text-left ${
-                      isHighlighted ? "bg-blue-100" : "bg-white"
-                    } hover:bg-blue-50 focus:bg-blue-50`}
-                  >
-                    <p className="text-sm font-semibold text-slate-900">
-                      {option.label}
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      {option.code ? `Codigo: ${option.code}` : ""}
-                      {option.barcode ? ` | Barras: ${option.barcode}` : ""}
-                    </p>
-                  </div>
-                )}
-              />
-
               <div className="flex flex-col gap-1 md:flex-row md:items-center md:justify-between">
                 <div>
-                  <p className="text-xs uppercase text-slate-500">Ficha técnica selecionada</p>
+                  <p className="text-xs uppercase text-slate-500">Ficha t├®cnica selecionada</p>
                   <p className="text-sm font-semibold text-slate-900">
-                    {(selectedBom?.productCode ?? form.productCode) || "--"} - Versão {selectedBom?.version ?? "1.0"}
+                    {selectedBom.productCode} ÔÇó Vers├úo {selectedBom.version}
                   </p>
                   <p className="text-xs text-slate-500">
-                    Lote base {selectedBom?.lotSize ?? form.quantityPlanned} | Validade {selectedBom?.validityDays ?? 0} dias
+                    Lote base {selectedBom.lotSize} | Validade {selectedBom.validityDays} dias
                   </p>
                 </div>
                 <div className="grid grid-cols-1 gap-2 text-sm md:grid-cols-2">
@@ -1807,117 +1528,46 @@ export default function ProductionOrdersPage() {
 
               <div className="overflow-hidden rounded-2xl border border-slate-200">
                 <div className="hidden bg-slate-50 text-left text-xs uppercase text-slate-500 md:grid md:grid-cols-12 md:gap-3 md:px-4 md:py-2">
-                  <span className="md:col-span-4">Matéria-prima</span>
+                  <span className="md:col-span-4">Mat?ria-prima</span>
                   <span className="md:col-span-2">Qtd base</span>
                   <span className="md:col-span-2">Qtd (plan.)</span>
                   <span className="md:col-span-2">Custo unit.</span>
                   <span className="md:col-span-2">Custo total</span>
                 </div>
                 <div className="divide-y divide-slate-100">
-                  {bomTotalsForPlan.items.map((item, index) => {
-                    const isExtra = Boolean((item as any).isExtra);
-                    const extraIndex = isExtra
-                      ? extraMaterials.findIndex(
-                          (extra) =>
-                            extra.id === (item as any).id ||
-                            extra.componentCode === item.componentCode,
-                        )
-                      : -1;
-                    const plannedCost =
-                      item.plannedCost ??
-                      (item.unitCost ?? 0) * (item.plannedQuantity ?? 0);
-
-                    return (
-                      <div
-                        key={`${item.componentCode}-${item.description}-${index}`}
-                        className="grid grid-cols-1 gap-2 px-4 py-3 text-sm md:grid-cols-12 md:items-center md:gap-3"
-                      >
-                        <div className="md:col-span-4">
-                          <div className="flex items-center gap-2">
-                            <p className="font-semibold text-slate-900">{item.description || "--"}</p>
-                            {isExtra ? (
-                              <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
-                                Extra
-                              </span>
-                            ) : null}
-                          </div>
-                          <p className="text-xs text-slate-500">{item.componentCode}</p>
-                        </div>
-                        <div className="flex items-center justify-between text-sm text-slate-900 md:col-span-2 md:block">
-                          <span className="md:hidden text-xs text-slate-500">Qtd base</span>
-                          {isExtra ? (
-                            <input
-                              type="number"
-                              min={0}
-                              step="0.0001"
-                              value={item.quantity}
-                              onChange={(e) => {
-                                if (extraIndex !== -1) {
-                                  updateExtraMaterial(extraIndex, "quantity", e.target.value);
-                                }
-                              }}
-                              className="w-full border border-slate-200 rounded-xl px-3 py-2"
-                            />
-                          ) : (
-                            <span>{item.quantity}</span>
-                          )}
-                        </div>
-                        <div className="flex items-center justify-between text-sm text-slate-900 md:col-span-2 md:block">
-                          <span className="md:hidden text-xs text-slate-500">Qtd (plan.)</span>
-                          <span>{item.plannedQuantity.toFixed(2)}</span>
-                        </div>
-                        <div className="flex items-center justify-between text-sm text-slate-900 md:col-span-2 md:block">
-                          <span className="md:hidden text-xs text-slate-500">Custo unit.</span>
-                          {isExtra ? (
-                            <input
-                              type="number"
-                              min={0}
-                              step="0.0001"
-                              value={item.unitCost}
-                              onChange={(e) => {
-                                if (extraIndex !== -1) {
-                                  updateExtraMaterial(extraIndex, "unitCost", e.target.value);
-                                }
-                              }}
-                              className="w-full border border-slate-200 rounded-xl px-3 py-2"
-                            />
-                          ) : (
-                            <span>{formatCurrency(item.unitCost ?? 0)}</span>
-                          )}
-                        </div>
-                        <div className="flex items-center justify-between text-sm text-slate-900 md:col-span-2 md:block gap-2">
-                          <div>
-                            <span className="md:hidden text-xs text-slate-500">Custo total</span>
-                            <p>{formatCurrency(plannedCost)}</p>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (isExtra) {
-                                if (extraIndex !== -1) removeExtraMaterial(extraIndex);
-                              } else {
-                                removeBaseMaterial(index);
-                              }
-                            }}
-                            className="text-xs font-semibold text-red-600"
-                          >
-                            Remover
-                          </button>
-                        </div>
+                  {bomTotalsForPlan.items.map((item) => (
+                    <div
+                      key={`${item.componentCode}-${item.description}`}
+                      className="grid grid-cols-1 gap-2 px-4 py-3 text-sm md:grid-cols-12 md:items-center md:gap-3"
+                    >
+                      <div className="md:col-span-4">
+                        <p className="font-semibold text-slate-900">{item.description || "--"}</p>
+                        <p className="text-xs text-slate-500">{item.componentCode}</p>
                       </div>
-                    );
-                  })}
+                      <div className="flex items-center justify-between text-sm text-slate-900 md:col-span-2 md:block">
+                        <span className="md:hidden text-xs text-slate-500">Qtd base</span>
+                        <span>{item.quantity}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm text-slate-900 md:col-span-2 md:block">
+                        <span className="md:hidden text-xs text-slate-500">Qtd (plan.)</span>
+                        <span>{item.plannedQuantity.toFixed(2)}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm text-slate-900 md:col-span-2 md:block">
+                        <span className="md:hidden text-xs text-slate-500">Custo unit.</span>
+                        <span>{formatCurrency(item.unitCost ?? 0)}</span>
+                      </div>
+                      <div className="flex items-center justify-between text-sm text-slate-900 md:col-span-2 md:block">
+                        <span className="md:hidden text-xs text-slate-500">Custo total</span>
+                        <span>{formatCurrency(item.plannedCost)}</span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
           ) : null}
-
+          
           <div className="md:col-span-3">
-            <button>
-              Gerar OP e calcular custos
-            </button>
-          </div>
-            <div className="md:col-span-3">
             <button
               type="submit"
               
@@ -1932,13 +1582,13 @@ export default function ProductionOrdersPage() {
           </div>
         </form>
         {/* {bomItems.length > 0 && (
-          <SectionCard title="Ficha T├cnica Selecionada" description="Base de custo e propor├├es">
+          <SectionCard title="Ficha T├®cnica Selecionada" description="Base de custo e propor├º├Áes">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs uppercase text-slate-500">
                   <th className="px-2 py-1">Item</th>
                   <th className="px-2 py-1">Qtd</th>
-                  <th className="px-2 py-1">Unit├rio</th>
+                  <th className="px-2 py-1">Unit├írio</th>
                   <th className="px-2 py-1">Total</th>
                 </tr>
               </thead>
@@ -1965,11 +1615,11 @@ export default function ProductionOrdersPage() {
 
       <SectionCard
         title="Custos previstos"
-        description="Baseado na ficha técnica vigente"
+        description="Baseado na ficha tecnica vigente"
       >
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">
           <div className="border border-slate-200 rounded-2xl p-4 bg-slate-50">
-            <p className="text-xs text-slate-500">Custo unitário produção</p>
+            <p className="text-xs text-slate-500">Custo unit├írio produ├º├úo</p>
             <p className="text-xl font-semibold">{formatCurrency(productionUnitCost)}</p>
           </div>
           <div className="border border-slate-200 rounded-2xl p-4">
@@ -1980,7 +1630,7 @@ export default function ProductionOrdersPage() {
             </p>
           </div>
           <div className="border border-slate-200 rounded-2xl p-4 bg-slate-50">
-            <p className="text-xs text-slate-500">Mão de obra extra</p>
+            <p className="text-xs text-slate-500">M├úo de obra extra</p>
             <p className="text-xl font-semibold">{formatCurrency(extraLaborCost)}</p>
             <p className="text-xs text-slate-500 mt-1">
               {formatCurrency(laborPerUnit)} / un x {form.quantityPlanned}
@@ -1990,25 +1640,25 @@ export default function ProductionOrdersPage() {
             <p className="text-xs text-slate-500">Custo total com extras</p>
             <p className="text-xl font-semibold">{formatCurrency(totalWithExtras)}</p>
             <p className="text-xs text-slate-500 mt-1">
-              Unitário: {formatCurrency(unitCostWithExtras)}
+              Unit├írio: {formatCurrency(unitCostWithExtras)}
             </p>
           </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">
           <div className="border border-slate-200 rounded-2xl p-4">
-            <p className="text-xs text-slate-500">Preço unitário venda</p>
+            <p className="text-xs text-slate-500">Pre├ºo unit├írio venda</p>
             <p className="text-xl font-semibold">{formatCurrency(salePricePerUnit)}</p>
             <p className="text-xs text-slate-500 mt-1">Markup aplicado: {saleMarkupApplied.toFixed(2)}%</p>
           </div>
           <div className="border border-slate-200 rounded-2xl p-4 bg-slate-50">
-            <p className="text-xs text-slate-500">Impostos pós-venda</p>
+            <p className="text-xs text-slate-500">Impostos p├│s-venda</p>
             <p className="text-xl font-semibold">{formatCurrency(postSaleTaxValue)}</p>
-            <p className="text-xs text-slate-500 mt-1">{postSaleTax}% sobre preço</p>
+            <p className="text-xs text-slate-500 mt-1">{postSaleTax}% sobre pre├ºo</p>
           </div>
           <div className="border border-slate-200 rounded-2xl p-4">
             <p className="text-xs text-slate-500">Receita total</p>
             <p className="text-xl font-semibold">{formatCurrency(revenueTotal)}</p>
-            <p className="text-xs text-slate-500 mt-1">Líquida: {formatCurrency(netRevenueTotal)}</p>
+            <p className="text-xs text-slate-500 mt-1">L├¡quida: {formatCurrency(netRevenueTotal)}</p>
           </div>
           <div className="border border-slate-200 rounded-2xl p-4 bg-slate-50">
             <p className="text-xs text-slate-500">Lucro estimado</p>
@@ -2041,9 +1691,9 @@ export default function ProductionOrdersPage() {
                 {orders.map((order) => (
                   <tr
                     key={order.id}
-                  onClick={() => setSelectedOrderId(order.id || order.OP)}
+                    onClick={() => setSelectedOrderId(order.id)}
                     className={`border-t border-slate-100 hover:bg-slate-50 cursor-pointer ${
-                      (order.id === selectedOrderId || order.OP === selectedOrderId) ? "bg-blue-50/50" : ""
+                      order.id === selectedOrderId ? "bg-blue-50/50" : ""
                     }`}
                   >
                     <td className="px-4 py-2 font-semibold text-slate-900">
@@ -2083,7 +1733,7 @@ export default function ProductionOrdersPage() {
                   </p>
                 </div>
                 <div className="border border-slate-200 rounded-2xl p-4">
-                  <p className="text-xs text-slate-500">Mão de obra</p>
+                  <p className="text-xs text-slate-500">M├úo de obra</p>
                   <p className="text-lg font-semibold text-slate-900">
                     {formatCurrencyOrDash(selectedOrderBreakdown.labor)}
                   </p>
@@ -2101,9 +1751,9 @@ export default function ProductionOrdersPage() {
                   </p>
                 </div>
                 <div className="border border-slate-200 rounded-2xl p-4">
-                  <p className="text-xs text-slate-500">Custo unitário</p>
+                  <p className="text-xs text-slate-500">Overhead</p>
                   <p className="text-lg font-semibold text-slate-900">
-                    {formatCurrencyOrDash(selectedOrder.unitCost)}
+                    {formatCurrencyOrDash(selectedOrderBreakdown.overhead)}
                   </p>
                 </div>
                 <div className="border border-slate-200 rounded-2xl p-4">
@@ -2112,13 +1762,13 @@ export default function ProductionOrdersPage() {
                     {formatCurrencyOrDash(selectedOrder.totalCost)}
                   </p>
                   <p className="text-xs text-slate-500 mt-1">
-                    Unitário: {formatCurrencyOrDash(selectedOrder.unitCost)}
+                    Unit├írio: {formatCurrencyOrDash(selectedOrder.unitCost)}
                   </p>
                 </div>
               </div>
             ) : (
               <p className="text-xs text-slate-500">
-                Custos ainda não computados para esta ordem.
+                Custos ainda n├úo computados para esta ordem.
               </p>
             )}
 
@@ -2126,7 +1776,7 @@ export default function ProductionOrdersPage() {
               <div className="rounded-2xl border border-slate-200 p-4">
                 <p className="text-xs text-slate-500">Produto</p>
                 <p className="text-base font-semibold text-slate-900">
-                  {selectedOrder.productCode} -{selectedOrder.productName}
+                  {selectedOrder.productCode}
                 </p>
                 <p className="text-xs text-slate-500 mt-1">
                   Quantidade planejada: {selectedOrder.quantityPlanned}{" "}
@@ -2134,9 +1784,9 @@ export default function ProductionOrdersPage() {
                 </p>
               </div>
               <div className="rounded-2xl border border-slate-200 p-4">
-                <p className="text-xs text-slate-500">Período</p>
+                <p className="text-xs text-slate-500">Per├¡odo</p>
                 <p className="text-sm font-semibold text-slate-900">
-                  {formatDateOrPlaceholder(selectedOrder.startDate)} {" "}
+                  {formatDateOrPlaceholder(selectedOrder.startDate)} ÔåÆ{" "}
                   {formatDateOrPlaceholder(selectedOrder.dueDate)}
                 </p>
                 <p className="text-xs text-slate-500 mt-1">
@@ -2149,7 +1799,7 @@ export default function ProductionOrdersPage() {
                   <StatusBadge status={selectedOrder.status} />
                 </div>
                 <p className="text-xs text-slate-500 mt-1">
-                  Última atualização{" "}
+                  ├Ültima atualiza├º├úo{" "}
                   {formatDateOrPlaceholder(selectedOrder.updatedAt)}
                 </p>
               </div>
@@ -2157,7 +1807,7 @@ export default function ProductionOrdersPage() {
 
             <div className="space-y-2">
               <h4 className="text-sm font-semibold text-slate-900">
-                Matérias-primas registradas
+                Mat├®rias-primas registradas
               </h4>
               {selectedOrderRawMaterials.length === 0 ? (
                 <p className="text-xs text-slate-500">
@@ -2168,8 +1818,8 @@ export default function ProductionOrdersPage() {
                   <table className="w-full text-xs md:text-sm">
                     <thead className="text-left text-slate-500 uppercase">
                       <tr>
-                        <th className="px-2 py-1">Código</th>
-                        <th className="px-2 py-1">Descrição</th>
+                        <th className="px-2 py-1">C├│digo</th>
+                        <th className="px-2 py-1">Descri├º├úo</th>
                         <th className="px-2 py-1 text-right">Qtd</th>
                         <th className="px-2 py-1">Un</th>
                         <th className="px-2 py-1 text-right">Custo</th>
@@ -2205,7 +1855,7 @@ export default function ProductionOrdersPage() {
               </h4>
               {selectedOrder.finishedGoods.length === 0 ? (
                         <p className="text-xs text-slate-500">
-                  Nenhum apontamento de produção finalizado.
+                  Nenhum apontamento de produ├º├úo finalizado.
                 </p>
               ) : (
                 <div className="overflow-x-auto">
@@ -2245,7 +1895,7 @@ export default function ProductionOrdersPage() {
 
             <div className="space-y-2">
               <h4 className="text-sm font-semibold text-slate-900">
-                Histórico de status
+                Hist├│rico de status
               </h4>
               {selectedOrder.statusHistory && selectedOrder.statusHistory.length > 0 ? (
                 <ul className="space-y-2 text-xs md:text-sm">
@@ -2274,7 +1924,7 @@ export default function ProductionOrdersPage() {
                 </ul>
               ) : (
                 <p className="text-xs text-slate-500">
-                  Sem histórico sincronizado para esta ordem.
+                  Sem hist├│rico sincronizado para esta ordem.
                 </p>
               )}
             </div>

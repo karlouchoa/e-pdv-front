@@ -6,7 +6,7 @@ export const calculateBomTotals = (payload: BomPayload) => {
     0,
   );
 
-  console.log("Ingredients cost:", ingredients);
+  // console.log("Ingredients cost:", ingredients);
   const lotSize = Math.max(payload.lotSize || 0, 1);
   const labor = ingredients * 0.12;
   const packaging = ingredients * 0.08;
