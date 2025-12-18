@@ -12,17 +12,20 @@ type MovementFilters = {
   from?: string;
   to?: string;
   itemId?: number;
+  cdemp?: string;
 };
 
 type SummaryFilters = {
   from: string;
   to: string;
   itemId?: number;
+  cdemp?: string;
 };
 
 type KardexFilters = {
   from?: string;
   to?: string;
+  cdemp?: string;
 };
 
 type MovementApiRecord = Record<string, unknown>;
@@ -68,6 +71,23 @@ const mapMovementFromApi = (
     normalizeNumber(getValue(record, ["id", "nrlan"])) ?? fallbackIdCounter++;
   const itemId =
     normalizeNumber(getValue(record, ["itemId", "cditem"])) ?? 0;
+  const itemCode =
+    normalizeString(getValue(record, ["itemCode", "cditem", "code"])) ??
+    (itemId ? String(itemId) : undefined);
+  const itemLabel = normalizeString(
+    getValue(record, [
+      "itemLabel",
+      "itemDescription",
+      "itemdescription",
+      "item_description",
+      "descricaoItem",
+      "descricao_item",
+      "itemName",
+      "deitem",
+      "descricao",
+      "name",
+    ]),
+  );
   const type =
     (getValue(record, ["type", "st"]) as InventoryMovementType) ?? "E";
   const quantity =
@@ -75,6 +95,8 @@ const mapMovementFromApi = (
   return {
     id,
     itemId,
+    itemCode,
+    itemLabel,
     type,
     date: normalizeString(getValue(record, ["date", "data"])) ?? "",
     quantity,
@@ -148,6 +170,7 @@ export async function listInventoryMovements(
     from: filters.from,
     to: filters.to,
     itemId: filters.itemId,
+    cdemp: filters.cdemp,
   });
   const response = await sessionRequest<MovementApiRecord[]>(session, {
     path: `/inventory/movements${query}`,
@@ -166,6 +189,7 @@ export async function getItemKardex(
   const query = buildQuery({
     from: filters?.from,
     to: filters?.to,
+    cdemp: filters?.cdemp,
   });
   const response = await sessionRequest<MovementApiRecord[]>(session, {
     path: `/inventory/movements/${itemId}${query}`,
@@ -184,6 +208,7 @@ export async function getMovementSummary(
     from: filters.from,
     to: filters.to,
     itemId: filters.itemId,
+    cdemp: filters.cdemp,
   });
   const response = await sessionRequest<MovementSummaryApiRecord>(session, {
     path: `/inventory/movements/summary${query}`,

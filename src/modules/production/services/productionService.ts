@@ -88,6 +88,8 @@ type BomItemApiRecord = {
   component_code?: string;
   description?: string;
   quantity?: number;
+  quantity_base?: number;
+  fator?: number;
   unit_cost?: number;
 };
 
@@ -113,8 +115,11 @@ const sanitizeNotes = (value?: string) => {
 const mapBomItemFromApi = (item: BomItemApiRecord): BomItemPayload => ({
   componentCode: item.component_code ?? "",
   description: item.description ?? undefined,
-  quantity: Number(item.quantity ?? 0),
+  // Para ordens: quantity deve refletir o campo quantity retornado pelo backend; quantity_base fica separado
+  quantity: Number(item.quantity ?? item.quantity_base ?? 0),
+  quantity_base: Number(item.quantity_base ?? item.quantity ?? 0),
   unitCost: Number(item.unit_cost ?? 0),
+  fator: Number(item.fator ?? 1),
 });
 
 const mapBomItemToApiPayload = (item: BomItemPayload) => ({
@@ -785,6 +790,7 @@ export async function listBoms(session: SessionData) {
     path: "/production/bom",
     method: "GET",
   });
+  console.log("listBoms response:", response);
   return Array.isArray(response) ? response.map(mapBomFromApi) : [];
 }
 
@@ -793,6 +799,7 @@ export async function getBom(session: SessionData, id: string) {
     path: `/production/bom/${id}`,
     method: "GET",
   });
+  console.log(`getBom response for id=${id}:`, response);
   return mapBomFromApi(response);
 }
 
@@ -861,6 +868,34 @@ export async function listProductionOrders(
 
   // console.log("listProductionOrders response:", response);
   return Array.isArray(response) ? response.map(mapOrderFromApi) : [];
+}
+
+export async function listSeparationProductionOrders(
+  session: SessionData,
+) {
+  const response = await api.get<ProductionOrderApiRecord[]>(
+    "/production/orders/separacao",
+    {
+      headers: buildTenantHeaders(session),
+    },
+  );
+
+  const data = response.data;
+  return Array.isArray(data) ? data.map(mapOrderFromApi) : [];
+}
+
+export async function listProductionOrdersInProduction(
+  session: SessionData,
+) {
+  const response = await api.get<ProductionOrderApiRecord[]>(
+    "/production/orders/producao",
+    {
+      headers: buildTenantHeaders(session),
+    },
+  );
+
+  const data = response.data;
+  return Array.isArray(data) ? data.map(mapOrderFromApi) : [];
 }
 
 export async function getProductionOrder(

@@ -22,7 +22,7 @@ import {
 } from "@/modules/core/types";
 import { SectionCard } from "@/modules/core/components/SectionCard";
 import { StatusBadge } from "@/modules/core/components/StatusBadge";
-import { formatCurrency, formatDate } from "@/modules/core/utils/formatters";
+import { formatCurrency, formatCurrency_2, formatDate } from "@/modules/core/utils/formatters";
 import { calculateBomTotals } from "@/modules/production/utils/calc";
 import dayjs from "dayjs";
 import { api } from "@/modules/core/services/api";
@@ -40,7 +40,7 @@ type ItemRecord = ProductPayload & {
   markup?: number;
 };
 
-type ExtraMaterial = BomItemPayload & { id: string };
+type ExtraMaterial = BomItemPayload & { id: string; plannedQuantity?: number };
 
 type AnyRecord = Record<string, unknown>;
 
@@ -57,7 +57,7 @@ const buildInitialOrder = (): ProductionOrderPayload => {
     // ƒ╣ CAMPOS PRINCIPAIS
     // -----------------------------
     productCode: "",
-    quantityPlanned: 1000,
+    quantityPlanned: 1,
     unit: "UN",
     startDate: start,
     dueDate: due,
@@ -542,21 +542,30 @@ export default function ProductionOrdersPage() {
         : selectedBom?.items?.length
           ? selectedBom.items
           : [];
-    const combined = [...baseItems, ...extraMaterials];
+    const combined = [
+      ...baseItems.map((item) => ({ ...item, isExtra: false })),
+      ...extraMaterials.map((item) => ({ ...item, isExtra: true })),
+    ];
     if (!combined.length) return [];
     const multiplier = form.quantityPlanned || 0;
 
     return combined
       .filter((item) => item.componentCode)
       .map((item) => {
-        const baseQuantity = Number(item.quantity || 0);
-        const plannedQuantity = baseQuantity * multiplier;
+        const isExtra = Boolean((item as any).isExtra);
+        const baseQuantity = isExtra ? 1 : Number(item.quantity || 0);
+        const plannedQuantity = isExtra
+          ? Number(
+              ('id' in item ? (item as ExtraMaterial).plannedQuantity : undefined) ??
+              baseQuantity * multiplier,
+            )
+          : baseQuantity * multiplier;
         return {
           componentCode: item.componentCode,
           description: item.description,
           quantityUsed: plannedQuantity,
           quantity: baseQuantity,
-          plannedQuantity: form.quantityPlanned,
+          plannedQuantity,
           unit: "UN",
           unitCost: item.unitCost,
         };
@@ -707,7 +716,7 @@ export default function ProductionOrdersPage() {
           : [];
     const combinedItems = [
       ...baseItems.map((item) => ({ ...item, isExtra: false })),
-      ...extraMaterials.map((item) => ({ ...item, isExtra: true })),
+      ...extraMaterials.map((item) => ({ ...item, isExtra: true, quantity: 1 })),
     ].filter((item) => item.componentCode);
 
     if (!combinedItems.length) {
@@ -717,12 +726,21 @@ export default function ProductionOrdersPage() {
         totalCost: 0,
       };
     }
-    const multiplier = form.quantityPlanned;
+    const multiplier = form.quantityPlanned || 0;
     const itemsWithTotals = combinedItems.map((item) => {
-      const plannedQuantity = item.quantity * multiplier;
-      const plannedCost = plannedQuantity * (item.unitCost ?? 0);
+      const isExtra = Boolean((item as any).isExtra);
+      const baseQuantity = isExtra ? 1 : Number(item.quantity || 0);
+      const plannedQuantity = isExtra
+        ? Number(
+            ('id' in item ? (item as ExtraMaterial).plannedQuantity : undefined) ??
+            baseQuantity * multiplier,
+          )
+        : baseQuantity * multiplier;
+      const unitCost = Number(item.unitCost ?? 0);
+      const plannedCost = plannedQuantity * unitCost;
       return {
         ...item,
+        quantity: baseQuantity,
         plannedQuantity,
         plannedCost,
       };
@@ -928,6 +946,8 @@ export default function ProductionOrdersPage() {
       description: item.name || item.description || "",
       quantity: 1,
       unitCost: item.costPrice ?? 0,
+      plannedQuantity: form.quantityPlanned || 1,
+      quantity_base: 1, // Added the required property
     };
 
     setExtraMaterials((prev) => {
@@ -940,6 +960,9 @@ export default function ProductionOrdersPage() {
           ...copy[existingIndex],
           description: newMaterial.description || copy[existingIndex].description,
           unitCost: newMaterial.unitCost ?? copy[existingIndex].unitCost,
+          plannedQuantity:
+            copy[existingIndex].plannedQuantity ?? newMaterial.plannedQuantity,
+          quantity: 1,
         };
         return copy;
       }
@@ -965,7 +988,7 @@ export default function ProductionOrdersPage() {
 
   const updateExtraMaterial = (
     index: number,
-    field: keyof Pick<ExtraMaterial, "quantity" | "unitCost">,
+    field: keyof Pick<ExtraMaterial, "quantity" | "unitCost" | "plannedQuantity">,
     value: string,
   ) => {
     setExtraMaterials((prev) => {
@@ -975,7 +998,12 @@ export default function ProductionOrdersPage() {
       const parsed = Number(value);
       copy[index] = {
         ...current,
-        [field]: Number.isFinite(parsed) ? parsed : current[field],
+        [field]:
+          field === "quantity"
+            ? 1
+            : Number.isFinite(parsed)
+              ? parsed
+              : (current as any)[field],
       };
       return copy;
     });
@@ -1104,7 +1132,7 @@ export default function ProductionOrdersPage() {
               <td class="cell center">${item.unit}</td>
               <td class="cell right">${formatNumber(item.plannedQty)}</td>
               <td class="cell right">${formatCurrency(item.unitCost ?? 0)}</td>
-              <td class="cell right">${formatCurrency(item.totalCost ?? 0)}</td>
+              <td class="cell right">${formatCurrency_2(item.totalCost ?? 0)}</td>
             </tr>
           `,
             )
@@ -1270,7 +1298,7 @@ export default function ProductionOrdersPage() {
                 <tfoot>
                   <tr>
                     <td class="cell right" colspan="6"><strong>Total materiais</strong></td>
-                    <td class="cell right"><strong>${formatCurrency(totalMaterialsCost)}</strong></td>
+                    <td class="cell right"><strong>${formatCurrency_2(totalMaterialsCost)}</strong></td>
                   </tr>
                 </tfoot>
               </table>
@@ -1297,11 +1325,11 @@ export default function ProductionOrdersPage() {
             <div class="totals">
               <div class="totals-item">
                 <div class="totals-label">Custo total previsto</div>
-                <div class="totals-value">${formatCurrency(selectedOrder.totalCost ?? totalMaterialsCost)}</div>
+                <div class="totals-value">${formatCurrency_2(selectedOrder.totalCost ?? totalMaterialsCost)}</div>
               </div>
               <div class="totals-item">
                 <div class="totals-label">Custo unitário</div>
-                <div class="totals-value">${formatCurrency(selectedOrder.unitCost ?? (selectedOrder.quantityPlanned ? totalMaterialsCost / selectedOrder.quantityPlanned : 0))}</div>
+                <div class="totals-value">${formatCurrency_2(selectedOrder.unitCost ?? (selectedOrder.quantityPlanned ? totalMaterialsCost / selectedOrder.quantityPlanned : 0))}</div>
               </div>
             </div>
 
@@ -1498,7 +1526,7 @@ export default function ProductionOrdersPage() {
             <label className="text-xs font-semibold text-slate-500">
               Produto
             </label>
-                        <SearchLookup
+              <SearchLookup
               table="t_itens"
               descriptionField="descricao"
               codeField="cditem"
@@ -1799,7 +1827,7 @@ export default function ProductionOrdersPage() {
                   <div className="rounded-2xl border border-slate-200 px-3 py-2 bg-slate-50">
                     <p className="text-[11px] uppercase text-slate-500">Custo total MP</p>
                     <p className="text-base font-semibold text-slate-900">
-                      {formatCurrency(bomTotalsForPlan.totalCost)}
+                      {formatCurrency_2(bomTotalsForPlan.totalCost)}
                     </p>
                   </div>
                 </div>
@@ -1846,25 +1874,29 @@ export default function ProductionOrdersPage() {
                         <div className="flex items-center justify-between text-sm text-slate-900 md:col-span-2 md:block">
                           <span className="md:hidden text-xs text-slate-500">Qtd base</span>
                           {isExtra ? (
-                            <input
-                              type="number"
-                              min={0}
-                              step="0.0001"
-                              value={item.quantity}
-                              onChange={(e) => {
-                                if (extraIndex !== -1) {
-                                  updateExtraMaterial(extraIndex, "quantity", e.target.value);
-                                }
-                              }}
-                              className="w-full border border-slate-200 rounded-xl px-3 py-2"
-                            />
+                            <span>1</span>
                           ) : (
                             <span>{item.quantity}</span>
                           )}
                         </div>
                         <div className="flex items-center justify-between text-sm text-slate-900 md:col-span-2 md:block">
                           <span className="md:hidden text-xs text-slate-500">Qtd (plan.)</span>
-                          <span>{item.plannedQuantity.toFixed(2)}</span>
+                          {isExtra ? (
+                            <input
+                              type="number"
+                              min={0}
+                              step="0.00001"
+                              value={Number(item.plannedQuantity ?? 0)}
+                              onChange={(e) => {
+                                if (extraIndex !== -1) {
+                                  updateExtraMaterial(extraIndex, "plannedQuantity", e.target.value);
+                                }
+                              }}
+                              className="w-full border border-slate-200 rounded-xl px-3 py-2"
+                            />
+                          ) : (
+                            <span>{item.plannedQuantity.toFixed(2)}</span>
+                          )}
                         </div>
                         <div className="flex items-center justify-between text-sm text-slate-900 md:col-span-2 md:block">
                           <span className="md:hidden text-xs text-slate-500">Custo unit.</span>
@@ -1872,7 +1904,7 @@ export default function ProductionOrdersPage() {
                             <input
                               type="number"
                               min={0}
-                              step="0.0001"
+                              step="0.00001"
                               value={item.unitCost}
                               onChange={(e) => {
                                 if (extraIndex !== -1) {
@@ -1888,7 +1920,7 @@ export default function ProductionOrdersPage() {
                         <div className="flex items-center justify-between text-sm text-slate-900 md:col-span-2 md:block gap-2">
                           <div>
                             <span className="md:hidden text-xs text-slate-500">Custo total</span>
-                            <p>{formatCurrency(plannedCost)}</p>
+                            <p>{formatCurrency_2(plannedCost)}</p>
                           </div>
                           <button
                             type="button"
@@ -1970,49 +2002,49 @@ export default function ProductionOrdersPage() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">
           <div className="border border-slate-200 rounded-2xl p-4 bg-slate-50">
             <p className="text-xs text-slate-500">Custo unitário produção</p>
-            <p className="text-xl font-semibold">{formatCurrency(productionUnitCost)}</p>
+            <p className="text-xl font-semibold">{formatCurrency_2(productionUnitCost)}</p>
           </div>
           <div className="border border-slate-200 rounded-2xl p-4">
             <p className="text-xs text-slate-500">Embalagens (caixas)</p>
-            <p className="text-xl font-semibold">{formatCurrency(packagingCost)}</p>
+            <p className="text-xl font-semibold">{formatCurrency_2(packagingCost)}</p>
             <p className="text-xs text-slate-500 mt-1">
-              {boxesQty} caixas x {formatCurrency(boxCost)}
+              {boxesQty} caixas x {formatCurrency_2(boxCost)}
             </p>
           </div>
           <div className="border border-slate-200 rounded-2xl p-4 bg-slate-50">
             <p className="text-xs text-slate-500">Mão de obra extra</p>
-            <p className="text-xl font-semibold">{formatCurrency(extraLaborCost)}</p>
+            <p className="text-xl font-semibold">{formatCurrency_2(extraLaborCost)}</p>
             <p className="text-xs text-slate-500 mt-1">
-              {formatCurrency(laborPerUnit)} / un x {form.quantityPlanned}
+              {formatCurrency_2(laborPerUnit)} / un x {form.quantityPlanned}
             </p>
           </div>
           <div className="border border-slate-200 rounded-2xl p-4">
             <p className="text-xs text-slate-500">Custo total com extras</p>
-            <p className="text-xl font-semibold">{formatCurrency(totalWithExtras)}</p>
+            <p className="text-xl font-semibold">{formatCurrency_2(totalWithExtras)}</p>
             <p className="text-xs text-slate-500 mt-1">
-              Unitário: {formatCurrency(unitCostWithExtras)}
+              Unitário: {formatCurrency_2(unitCostWithExtras)}
             </p>
           </div>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">
           <div className="border border-slate-200 rounded-2xl p-4">
             <p className="text-xs text-slate-500">Preço unitário venda</p>
-            <p className="text-xl font-semibold">{formatCurrency(salePricePerUnit)}</p>
+            <p className="text-xl font-semibold">{formatCurrency_2(salePricePerUnit)}</p>
             <p className="text-xs text-slate-500 mt-1">Markup aplicado: {saleMarkupApplied.toFixed(2)}%</p>
           </div>
           <div className="border border-slate-200 rounded-2xl p-4 bg-slate-50">
             <p className="text-xs text-slate-500">Impostos pós-venda</p>
-            <p className="text-xl font-semibold">{formatCurrency(postSaleTaxValue)}</p>
+            <p className="text-xl font-semibold">{formatCurrency_2(postSaleTaxValue)}</p>
             <p className="text-xs text-slate-500 mt-1">{postSaleTax}% sobre preço</p>
           </div>
           <div className="border border-slate-200 rounded-2xl p-4">
             <p className="text-xs text-slate-500">Receita total</p>
-            <p className="text-xl font-semibold">{formatCurrency(revenueTotal)}</p>
+            <p className="text-xl font-semibold">{formatCurrency_2(revenueTotal)}</p>
             <p className="text-xs text-slate-500 mt-1">Líquida: {formatCurrency(netRevenueTotal)}</p>
           </div>
           <div className="border border-slate-200 rounded-2xl p-4 bg-slate-50">
             <p className="text-xs text-slate-500">Lucro estimado</p>
-            <p className="text-xl font-semibold">{formatCurrency(profitTotal)}</p>
+            <p className="text-xl font-semibold">{formatCurrency_2(profitTotal)}</p>
             <p className="text-xs text-slate-500 mt-1">vs custo: {saleMarkupApplied.toFixed(2)}%</p>
           </div>
         </div>

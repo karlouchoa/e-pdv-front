@@ -75,6 +75,8 @@ export interface SearchLookupProps {
   label?: string;
   inputClassName?: string;
   onSelect: (option: SearchOption) => void;
+  onChange?: (value: string) => void;
+  onClear?: () => void;
   renderOption?: (option: SearchOption, isHighlighted: boolean) => ReactNode;
   defaultValue?: string;
 }
@@ -88,6 +90,8 @@ export function SearchLookup({
   label,
   inputClassName,
   onSelect,
+  onChange,
+  onClear,
   renderOption,
   defaultValue,
 }: SearchLookupProps) {
@@ -117,10 +121,18 @@ export function SearchLookup({
   );
 
   useEffect(() => {
-    if (defaultValue !== undefined) {
-      setSearchTerm(defaultValue);
-    }
+    if (defaultValue === undefined) return;
+    setSearchTerm((prev) => (prev ? prev : defaultValue));
   }, [defaultValue]);
+
+  useEffect(() => {
+    if (showResults && results.length > 0 && highlightIndex < 0) {
+      setHighlightIndex(0);
+    }
+    if (results.length === 0) {
+      setHighlightIndex(-1);
+    }
+  }, [showResults, results, highlightIndex]);
 
   useEffect(() => {
     const term = searchTerm.trim();
@@ -222,30 +234,55 @@ export function SearchLookup({
         value={searchTerm}
         onFocus={() => searchTerm.trim() && setShowResults(true)}
         onChange={(event) => {
-          setSearchTerm(event.target.value);
+          const value = event.target.value;
+          setSearchTerm(value);
+          onChange?.(value);
+          if (!value.trim()) {
+            onClear?.();
+          }
           setShowResults(true);
           setHighlightIndex(-1);
         }}
         onKeyDown={(event) => {
-          if (!showResults || results.length === 0) return;
+          event.stopPropagation();
+          const key = event.key;
+          const isDown = key === "ArrowDown" || key === "Down" || event.keyCode === 40;
+          const isUp = key === "ArrowUp" || key === "Up" || event.keyCode === 38;
+          const isEnter = key === "Enter" || event.keyCode === 13;
+          const isEscape = key === "Escape" || key === "Esc" || event.keyCode === 27;
 
-          if (event.key === "ArrowDown") {
+          if (isDown) {
             event.preventDefault();
-            setHighlightIndex((prev) =>
-              prev < results.length - 1 ? prev + 1 : prev,
-            );
+            setShowResults(true);
+            setHighlightIndex((prev) => {
+              if (results.length === 0) return prev;
+              if (prev < 0) return 0;
+              return prev < results.length - 1 ? prev + 1 : prev;
+            });
           }
 
-          if (event.key === "ArrowUp") {
+          if (isUp) {
             event.preventDefault();
-            setHighlightIndex((prev) => (prev > 0 ? prev - 1 : prev));
+            setShowResults(true);
+            setHighlightIndex((prev) => {
+              if (results.length === 0) return prev;
+              if (prev < 0) return results.length - 1;
+              return prev > 0 ? prev - 1 : prev;
+            });
           }
 
-          if (event.key === "Enter") {
+          if (isEnter) {
             event.preventDefault();
-            if (highlightIndex >= 0) {
-              handleSelect(results[highlightIndex]);
-            }
+            if (results.length === 0) return;
+            const targetIndex =
+              highlightIndex >= 0 ? highlightIndex : 0;
+            handleSelect(results[targetIndex]);
+          }
+
+          if (isEscape) {
+            event.preventDefault();
+            setShowResults(false);
+            setHighlightIndex(-1);
           }
         }}
         placeholder={placeholder}

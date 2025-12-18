@@ -1,10 +1,31 @@
 import { BomPayload } from "@/modules/core/types";
 
 export const calculateBomTotals = (payload: BomPayload) => {
-  const ingredients = payload.items.reduce(
-    (sum, item) => sum + item.quantity * item.unitCost,
-    0,
-  );
+  const toThree = (value: number) => Number(value.toFixed(3));
+
+  const ingredients = payload.items.reduce((sum, item) => {
+    const baseQty = Number(
+      Number.isFinite((item as any).quantity_base)
+        ? (item as any).quantity_base
+        : item.quantity ?? 0,
+    );
+    const factor = (() => {
+      if (Number.isFinite((item as any).fator)) {
+        return Number((item as any).fator);
+      }
+      if (Number.isFinite(item.percentage)) {
+        return Number(item.percentage) / 100;
+      }
+      return 1;
+    })();
+
+    const normalizedQty = toThree(baseQty);
+    const normalizedFactor = toThree(factor);
+    const effectiveQty = toThree(normalizedQty * normalizedFactor);
+    const lineTotal = toThree(effectiveQty * item.unitCost);
+
+    return sum + lineTotal;
+  }, 0);
 
   // console.log("Ingredients cost:", ingredients);
   const lotSize = Math.max(payload.lotSize || 0, 1);

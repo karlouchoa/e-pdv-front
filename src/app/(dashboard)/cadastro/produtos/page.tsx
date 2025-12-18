@@ -167,6 +167,32 @@ const calculatePriceFromMarkup = (cost: number, markup: number) => {
   return cost * (1 + markup / 100);
 };
 
+const formatDecimalDisplay = (value: number) => {
+  if (!Number.isFinite(value)) return "";
+  const fixed = value.toFixed(7); // até 7 casas
+  const trimmed = fixed.replace(/\.?0+$/, ""); // remove zeros à direita
+  const [intPart, decPart = ""] = trimmed.split(".");
+  const decimals = decPart.length >= 2 ? decPart : decPart.padEnd(2, "0");
+  return `${intPart},${decimals}`;
+};
+
+const parseDecimalInput = (value: string | number) => {
+  if (typeof value === "number") return value;
+  const trimmed = value.trim();
+  if (!trimmed) return Number.NaN;
+  const normalized = trimmed.replace(",", ".");
+  const parsed = Number(normalized);
+  return Number.isNaN(parsed) ? Number.NaN : parsed;
+};
+
+const buildDecimalDrafts = (state: ItemFormState) => ({
+  packagingQty: formatDecimalDisplay(state.packagingQty),
+  purchasePrice: formatDecimalDisplay(state.purchasePrice),
+  costPrice: formatDecimalDisplay(state.costPrice),
+  markup: formatDecimalDisplay(state.markup),
+  salePrice: formatDecimalDisplay(state.salePrice),
+});
+
 
 const candidateKeys = [
   "data",
@@ -330,6 +356,9 @@ export default function ProductsPage() {
   const [feedback, setFeedback] = useState<string | null>(null);
   const [imageError, setImageError] = useState(false);
   const [imagePreviewUrl, setImagePreviewUrl] = useState("");
+  const [decimalDrafts, setDecimalDrafts] = useState(
+    buildDecimalDrafts(emptyForm),
+  );
 
 const loadData = useCallback(async () => {
     if (!session) return;
@@ -390,7 +419,7 @@ const handleSelectItem = (item: ItemRecord) => {
   //   isComposed: item.isComposed,
   //   isRawMaterial: item.isRawMaterial,
   // });
-  setForm({
+  const nextForm = {
     ...item,
     notes: item.notes ?? "",
     imagePath: item.imagePath ?? "",
@@ -404,7 +433,9 @@ const handleSelectItem = (item: ItemRecord) => {
       item.markup !== undefined
         ? item.markup
         : calculateMarkup(item.costPrice ?? 0, item.salePrice ?? 0),
-  });
+  };
+  setForm(nextForm);
+  setDecimalDrafts(buildDecimalDrafts(nextForm));
   setImagePreviewUrl(item.imagePath?.trim() ?? "");
   setImageError(false);
 };
@@ -436,6 +467,59 @@ const handleSelectItem = (item: ItemRecord) => {
         ...prev,
         [field]: value,
       };
+    });
+  };
+
+  const handleDecimalChange = (
+    field: "packagingQty" | "purchasePrice" | "costPrice" | "markup" | "salePrice",
+    rawValue: string,
+  ) => {
+    const parsedValue = parseDecimalInput(rawValue);
+    const numeric = Number.isNaN(parsedValue) ? 0 : parsedValue;
+
+    setForm((prev) => {
+      if (field === "costPrice") {
+        const cost = numeric;
+        const price = prev.salePrice ?? 0;
+        const markup = calculateMarkup(cost, price);
+        setDecimalDrafts((draft) => ({
+          ...draft,
+          costPrice: rawValue,
+          markup: formatDecimalDisplay(markup),
+        }));
+        return { ...prev, costPrice: cost, markup };
+      }
+
+      if (field === "salePrice") {
+        const price = numeric;
+        const cost = prev.costPrice ?? 0;
+        const markup = calculateMarkup(cost, price);
+        setDecimalDrafts((draft) => ({
+          ...draft,
+          salePrice: rawValue,
+          markup: formatDecimalDisplay(markup),
+        }));
+        return { ...prev, salePrice: price, markup };
+      }
+
+      if (field === "markup") {
+        const markup = numeric;
+        const cost = prev.costPrice ?? 0;
+        const price = calculatePriceFromMarkup(cost, markup);
+        setDecimalDrafts((draft) => ({
+          ...draft,
+          markup: rawValue,
+          salePrice: formatDecimalDisplay(price),
+        }));
+        return { ...prev, markup, salePrice: price };
+      }
+
+      // packagingQty, purchasePrice
+      setDecimalDrafts((draft) => ({
+        ...draft,
+        [field]: rawValue,
+      }));
+      return { ...prev, [field]: numeric };
     });
   };
 
@@ -491,6 +575,7 @@ const handleSelectItem = (item: ItemRecord) => {
       //  setShowSearchResults(false);
         setImagePreviewUrl("");
         setImageError(false);
+        setDecimalDrafts(buildDecimalDrafts(emptyForm));
       }
     } catch (error) {
       setFeedback(
@@ -508,6 +593,7 @@ const handleSelectItem = (item: ItemRecord) => {
     setFeedback(null);
     setImagePreviewUrl("");
     setImageError(false);
+    setDecimalDrafts(buildDecimalDrafts(emptyForm));
   };
 
   return (
@@ -634,11 +720,19 @@ const handleSelectItem = (item: ItemRecord) => {
                 Embalagem (qtd por embalagem)
               </label>
               <input
-                type="number"
-                step="0.01"
-                value={form.packagingQty}
+                type="text"
+                inputMode="decimal"
+                pattern="[0-9.,]*"
+                value={decimalDrafts.packagingQty}
+                onFocus={(event) => event.currentTarget.select()}
                 onChange={(event) =>
-                  handleInputChange("packagingQty", Number(event.target.value))
+                  handleDecimalChange("packagingQty", event.target.value)
+                }
+                onBlur={() =>
+                  setDecimalDrafts((draft) => ({
+                    ...draft,
+                    packagingQty: formatDecimalDisplay(form.packagingQty),
+                  }))
                 }
                 className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2"
               />
@@ -648,11 +742,19 @@ const handleSelectItem = (item: ItemRecord) => {
                 Compra
               </label>
               <input
-                type="number"
-                step="0.01"
-                value={form.purchasePrice}
+                type="text"
+                inputMode="decimal"
+                pattern="[0-9.,]*"
+                value={decimalDrafts.purchasePrice}
+                onFocus={(event) => event.currentTarget.select()}
                 onChange={(event) =>
-                  handleInputChange("purchasePrice", Number(event.target.value))
+                  handleDecimalChange("purchasePrice", event.target.value)
+                }
+                onBlur={() =>
+                  setDecimalDrafts((draft) => ({
+                    ...draft,
+                    purchasePrice: formatDecimalDisplay(form.purchasePrice),
+                  }))
                 }
                 className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2"
               />
@@ -662,11 +764,19 @@ const handleSelectItem = (item: ItemRecord) => {
                 Custo
               </label>
               <input
-                type="number"
-                step="0.01"
-                value={form.costPrice}
+                type="text"
+                inputMode="decimal"
+                pattern="[0-9.,]*"
+                value={decimalDrafts.costPrice}
+                onFocus={(event) => event.currentTarget.select()}
                 onChange={(event) =>
-                  handleInputChange("costPrice", Number(event.target.value))
+                  handleDecimalChange("costPrice", event.target.value)
+                }
+                onBlur={() =>
+                  setDecimalDrafts((draft) => ({
+                    ...draft,
+                    costPrice: formatDecimalDisplay(form.costPrice),
+                  }))
                 }
                 className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2"
               />
@@ -676,11 +786,20 @@ const handleSelectItem = (item: ItemRecord) => {
                 Markup (%)
               </label>
               <input
-                type="number"
-                step="0.01"
-                value={form.markup}
+                type="text"
+                inputMode="decimal"
+                pattern="[0-9.,]*"
+                value={decimalDrafts.markup}
+                onFocus={(event) => event.currentTarget.select()}
                 onChange={(event) =>
-                  handleInputChange("markup", Number(event.target.value))
+                  handleDecimalChange("markup", event.target.value)
+                }
+                onBlur={() =>
+                  setDecimalDrafts((draft) => ({
+                    ...draft,
+                    markup: formatDecimalDisplay(form.markup),
+                    salePrice: formatDecimalDisplay(form.salePrice),
+                  }))
                 }
                 className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2"
               />
@@ -690,11 +809,20 @@ const handleSelectItem = (item: ItemRecord) => {
                 Preço de venda
               </label>
               <input
-                type="number"
-                step="0.01"
-                value={form.salePrice}
+                type="text"
+                inputMode="decimal"
+                pattern="[0-9.,]*"
+                value={decimalDrafts.salePrice}
+                onFocus={(event) => event.currentTarget.select()}
                 onChange={(event) =>
-                  handleInputChange("salePrice", Number(event.target.value))
+                  handleDecimalChange("salePrice", event.target.value)
+                }
+                onBlur={() =>
+                  setDecimalDrafts((draft) => ({
+                    ...draft,
+                    salePrice: formatDecimalDisplay(form.salePrice),
+                    markup: formatDecimalDisplay(form.markup),
+                  }))
                 }
                 className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2"
               />

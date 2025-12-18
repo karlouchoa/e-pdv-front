@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useCallback, useMemo, useRef, useState } from "react";
 import { useSession } from "@/modules/core/hooks/useSession";
 import { SectionCard } from "@/modules/core/components/SectionCard";
+import { SearchLookup, SearchOption } from "@/modules/core/components/SearchLookup";
 import { formatCurrency, formatDate } from "@/modules/core/utils/formatters";
 import {
   InventoryMovementPayload,
@@ -10,7 +11,6 @@ import {
   InventoryMovementSummary,
   InventoryMovementType,
   ProductPayload,
-  Category
 } from "@/modules/core/types";
 
 import {
@@ -20,6 +20,7 @@ import {
   listInventoryMovements,
 } from "@/modules/stock/services/stockService";
 import { api } from "@/modules/core/services/api";
+import { Session } from "inspector/promises";
 
 type ItemRecord = ProductPayload & {
   id: string;
@@ -31,39 +32,9 @@ type ItemRecord = ProductPayload & {
   imagePath?: string;
 };
 
-type ItemFormState = ProductPayload & {
-  id: string | null;
-  isComposed: boolean;
-  isRawMaterial: boolean;
-  notes: string;
-  imagePath: string;
-};
-
 type AnyRecord = Record<string, unknown>;
 
 const toRecord = (value: unknown): AnyRecord => (value ?? {}) as AnyRecord;
-
-const emptyForm: ItemFormState = {
-  id: null,
-  sku: "",
-  name: "",
-  unit: "UN",
-  category: "",
-  salePrice: 0,
-  costPrice: 0,
-  leadTimeDays: 7,
-  type: "acabado",
-  description: "",
-  ncm: "",
-  cest: "",
-  cst: "",
-  barcode: "",
-  isComposed: false,
-  isRawMaterial: false,
-  notes: "",
-  imagePath: "",
-  qtembitem: 0, // Added qtembitem with a default value
-};
 
 const documentTypesEntrada = [
   { label: "Compra", value: "C" },
@@ -209,27 +180,6 @@ const parsePositiveNumber = (value: string) => {
   return parsed;
 };
 
-const stripDiacritics = (value: string) =>
-  value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
-
-const normalizeQuery = (value: string) =>
-  stripDiacritics(value).toLowerCase();
-
-const matchItemQuery = (item: ItemRecord, query: string) => {
-  const normalizedQuery = normalizeQuery(query.trim());
-  if (!normalizedQuery) return false;
-  const name = normalizeQuery(item.name);
-  const sku = normalizeQuery(item.sku);
-  const barcode = normalizeQuery(item.barcode ?? "");
-  return (
-    name.includes(normalizedQuery) ||
-    sku.startsWith(normalizedQuery) ||
-    barcode.startsWith(normalizedQuery)
-  );
-};
-
 const findArrayDeep = (value: unknown, depth = 0): AnyRecord[] | null => {
   if (depth > 5) return null;
   if (Array.isArray(value)) {
@@ -311,37 +261,37 @@ export default function StockMovementsPage() {
   const [movementFilters, setMovementFilters] = useState(
     movementFilterDefaults,
   );
-  const [appliedMovementFilters, setAppliedMovementFilters] = useState(
-    movementFilterDefaults,
-  );
+  const [movementItemCandidate, setMovementItemCandidate] = useState("");
+  const [appliedMovementFilters, setAppliedMovementFilters] = useState<
+    typeof movementFilterDefaults | null
+  >(null);
 
   const [summaryFilters, setSummaryFilters] = useState(summaryFilterDefaults);
-  const [appliedSummaryFilters, setAppliedSummaryFilters] = useState(
-    summaryFilterDefaults,
-  );
+  const [summaryItemCandidate, setSummaryItemCandidate] = useState("");
+  const [appliedSummaryFilters, setAppliedSummaryFilters] = useState<
+    typeof summaryFilterDefaults | null
+  >(null);
   const [summary, setSummary] = useState<InventoryMovementSummary | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
 
   const [kardexFilters, setKardexFilters] = useState(kardexFilterDefaults);
-  const [appliedKardexFilters, setAppliedKardexFilters] =
-    useState(kardexFilterDefaults);
+  const [kardexItemCandidate, setKardexItemCandidate] = useState("");
+  const [appliedKardexFilters, setAppliedKardexFilters] = useState<
+    typeof kardexFilterDefaults | null
+  >(null);
   const [kardex, setKardex] = useState<InventoryMovementRecord[]>([]);
   const [kardexLoading, setKardexLoading] = useState(false);
   const [kardexError, setKardexError] = useState<string | null>(null);
 
-  const [searchTerm, setSearchTerm] = useState("");
-  const [showSearchResults, setShowSearchResults] = useState(false);
-  const [items, setItems] = useState<ItemRecord[]>([]);
-  const [form, setForm] = useState<ItemFormState>(emptyForm);
-  const [loading, setLoading] = useState(true);
-  const [categories, setCategories] = useState<Category[]>([]);
-  const [feedback, setFeedback] = useState<string | null>(null);
-  const [highlightIndex, setHighlightIndex] = useState(-1);
-  const lastRemoteSearch = useRef("");
+  const [selectedItemLabel, setSelectedItemLabel] = useState("");
   const [clientes, setClientes] = useState<ClienteRecord[]>([]);
   const [fornecedores, setFornecedores] = useState<FornecedorRecord[]>([]);
   const [empresas, setEmpresas] = useState<EmpresaRecord[]>([]);
+
+  const fornecedoresLoaded = useRef(false);
+  const clientesLoaded = useRef(false);
+  const empresasLoaded = useRef(false);
 
   const [counterpartySearch, setCounterpartySearch] = useState("");
   const [counterpartyResults, setCounterpartyResults] = useState<any[]>([]);
@@ -352,6 +302,18 @@ export default function StockMovementsPage() {
   const [warehouseResults, setWarehouseResults] = useState<EmpresaRecord[]>([]);
   const [showWarehouseResults, setShowWarehouseResults] = useState(false);
   const [warehouseHighlightIndex, setWarehouseHighlightIndex] = useState(-1);
+
+  useEffect(() => {
+    if (!session?.warehouse) return;
+
+    setMovementForm((prev) => ({
+      ...prev,
+      warehouse: session.warehouse ?? "",
+    }));
+
+    const label = (session.warehouseLabel ?? "").trim();
+    setWarehouseSearch(label || session.warehouse);
+  }, [session]);
 
   const documentTypeOptions =
   movementForm.type === "E"
@@ -411,107 +373,65 @@ export default function StockMovementsPage() {
   };
   
 
-  const loadData = useCallback(async () => {
-      if (!session) return;
-      setLoading(true);
-      try {
-        const [itemsResponse,fornecedoresResponse,
-               clientesResponse,  empresasResponse,
-              ] = await Promise.all([
-          api.get("/T_ITENS", { params: { tabela: "T_ITENS" } }),
-          api.get("/T_FOR"),
-          api.get("/T_CLI"),
-          api.get("/T_EMP"),
-        ]);
+  const fetchFornecedores = useCallback(async () => {
+    if (!session) return [];
+    if (fornecedoresLoaded.current && fornecedores.length > 0) {
+      return fornecedores;
+    }
+
+    try {
+      const response = await api.get("/T_FOR");
+      const rawFornecedores = extractArray<AnyRecord>(response.data);
+      const normalizedFornecedores = rawFornecedores.map(normalizeFornecedor);
+      setFornecedores(normalizedFornecedores);
+      fornecedoresLoaded.current = true;
+      return normalizedFornecedores;
+    } catch (error) {
+      console.error("Falha ao carregar fornecedores", error);
+      return fornecedores;
+    }
+  }, [session, fornecedores]);
+
+  const fetchClientes = useCallback(async () => {
+    if (!session) return [];
+    if (clientesLoaded.current && clientes.length > 0) {
+      return clientes;
+    }
+
+    try {
+      const response = await api.get("/T_CLI");
+      const rawClientes = extractArray<AnyRecord>(response.data);
+      const normalizedClientes = rawClientes.map(normalizeCliente);
+      setClientes(normalizedClientes);
+      clientesLoaded.current = true;
+      return normalizedClientes;
+    } catch (error) {
+      console.error("Falha ao carregar clientes", error);
+      return clientes;
+    }
+  }, [session, clientes]);
+
+  const fetchEmpresas = useCallback(async () => {
+    if (!session) return [];
+    if (empresasLoaded.current && empresas.length > 0) {
+      return empresas;
+    }
+
+    try {
+      const response = await api.get("/T_EMP");
+      const rawEmpresas = extractArray<AnyRecord>(response.data);
+      const normalizedEmpresas = rawEmpresas.map((item) =>
+        normalizeEmpresa(item),
+      );
+      setEmpresas(normalizedEmpresas);
+      empresasLoaded.current = true;
+      return normalizedEmpresas;
+    } catch (error) {
+      console.error("Falha ao carregar empresas", error);
+      return empresas;
+    }
+  }, [session, empresas]);
         
-        // console.log("Resposta itens:", itemsResponse.data);
-  
-        // ITENS
-        const rawItems = extractArray<AnyRecord>(itemsResponse.data);
-        const normalizedItems = rawItems.map((item, index) =>
-          normalizeItemFromApi(item, `item-${index}`),
-        );
-
-        setItems(normalizedItems);
-
-        // CLIENTES
-        const rawClientes = extractArray<AnyRecord>(clientesResponse.data);
-        setClientes(rawClientes.map(normalizeCliente));
-
-        // FORNECEDORES
-        const rawFornecedores = extractArray<AnyRecord>(fornecedoresResponse.data);
-        setFornecedores(rawFornecedores.map(normalizeFornecedor));
-
-        // EMPRESAS
-        const rawEmpresas = extractArray<EmpresaRecord>(empresasResponse.data);
-        const normalizedEmpresas = rawEmpresas.map((item, index) =>
-          normalizeEmpresa(item),
-        );
-        //setEmpresas(rawEmpresas.map(normalizeEmpresa));
-        setEmpresas(normalizedEmpresas);
-        
-        // console.log("Empresas carregadas:", empresasResponse.data);
-        // console.log("Empresas carregadas:", rawEmpresas);
-
-      } catch (error) {
-        console.error("Falha ao carregar cadastros", error);
-        setFeedback(
-          error instanceof Error
-            ? error.message
-            : "Falha ao carregar cadastros.",
-        );
-      } finally {
-        setLoading(false);
-      }
-    }, [session]);
-  
-    useEffect(() => {
-      loadData();
-    }, [loadData]);
-
-       
-
-    const searchResults = useMemo(() => {
-      if (!searchTerm.trim()) return [];
-      return items
-        .filter((item) => matchItemQuery(item, searchTerm))
-        .slice(0, 10);
-    }, [items, searchTerm]);
-
-    useEffect(() => {
-      const term = searchTerm.trim();
-      if (!session) return;
-      if (!term) {
-        lastRemoteSearch.current = "";
-        return;
-      }
-      if (searchResults.length > 0) return;
-      if (lastRemoteSearch.current === term) return;
-
-      const fetchByDescription = async () => {
-        lastRemoteSearch.current = term;
-        try {
-          const response = await api.get("/T_ITENS", {
-            params: { tabela: "T_ITENS", descricao: term },
-          });
-          const rawItems = extractArray<AnyRecord>(response.data);
-          const normalizedItems = rawItems.map((item, index) =>
-            normalizeItemFromApi(item, `item-search-${index}`),
-          );
-          setItems((prev) => {
-            const merged = new Map(prev.map((item) => [item.id, item]));
-            normalizedItems.forEach((item) => {
-              merged.set(item.id, item);
-            });
-            return Array.from(merged.values());
-          });
-        } catch (error) {
-          console.error("Falha ao buscar itens por descricao", error);
-        }
-      };
-
-      fetchByDescription();
-    }, [searchResults, searchTerm, session]);
 
     const handleSelectItem = (item: ItemRecord) => {
       setMovementForm((prev) => ({
@@ -520,9 +440,6 @@ export default function StockMovementsPage() {
         itemSku: item.sku,                        // Preenche CDITEM
         unitPrice: item.costPrice.toString(),     // Preenche preço unitário
       }));
-    
-      setSearchTerm(item.name);
-      setShowSearchResults(false);
     };
     
   
@@ -537,7 +454,7 @@ export default function StockMovementsPage() {
       setCounterpartyHighlightIndex(-1);
     };
 
-    const handleSelectWarehouse = (item: EmpresaRecord) => {~
+    const handleSelectWarehouse = (item: EmpresaRecord) => {
       // console.log("WAREHOUSE SELECIONADO:", item);
       setMovementForm((prev) => ({
         ...prev,
@@ -624,8 +541,7 @@ export default function StockMovementsPage() {
         const created = await createInventoryMovement(session, payload);
         setMovementMessage("Movimento registrado com sucesso.");
         setMovementForm(movementFormDefaults);
-        setSearchTerm("");
-        setShowSearchResults(false);
+        setSelectedItemLabel("");
         setCounterpartySearch("");
         setCounterpartyResults([]);
         setShowCounterpartyResults(false);
@@ -647,34 +563,55 @@ export default function StockMovementsPage() {
         setWarehouseResults([]);
         return;
       }
-    
-      const term = warehouseSearch.toLowerCase();
-    
-      const filtered = empresas.filter((emp) =>
-        emp.name.toLowerCase().includes(term) ||
-        emp.code.toLowerCase().includes(term)
-      );
-    
-      setWarehouseResults(filtered);
-    }, [warehouseSearch, empresas]);
+
+      let cancelled = false;
+
+      const fetchAndFilterWarehouses = async () => {
+        const source =
+          empresasLoaded.current && empresas.length > 0
+            ? empresas
+            : await fetchEmpresas();
+
+        const term = warehouseSearch.toLowerCase();
+
+        const filtered = (source ?? []).filter(
+          (emp) =>
+            emp.name.toLowerCase().includes(term) ||
+            emp.code.toLowerCase().includes(term),
+        );
+
+        if (!cancelled) {
+          setWarehouseResults(filtered);
+        }
+      };
+
+      fetchAndFilterWarehouses();
+
+      return () => {
+        cancelled = true;
+      };
+    }, [warehouseSearch, empresas, fetchEmpresas]);
     
 
     useEffect(() => {
-      if (!session) return;
-      const fetchMovements = async () => {
-        setMovementsLoading(true);
-        setMovementsError(null);
-        try {
-          const parsedFilters = {
-            type: appliedMovementFilters.type,
-            from: appliedMovementFilters.from || undefined,
-            to: appliedMovementFilters.to || undefined,
-            itemId: parseNumber(appliedMovementFilters.itemId),
-          };
-          const response = await listInventoryMovements(session, parsedFilters);
-          setMovements(response);
-        } catch (error) {
-          setMovementsError(
+    if (!session || !appliedMovementFilters) return;
+    const fetchMovements = async () => {
+      setMovementsLoading(true);
+      setMovementsError(null);
+      try {
+        const parsedFilters = {
+          type: appliedMovementFilters.type,
+          from: appliedMovementFilters.from || undefined,
+          to: appliedMovementFilters.to || undefined,
+          itemId: parseNumber(appliedMovementFilters.itemId),
+          cdemp: session.warehouse ?? undefined,
+        };
+
+        const response = await listInventoryMovements(session, parsedFilters);
+        console.log("Movimentos recebidos:", response);
+        setMovements(response);
+      } catch (error) {
+        setMovementsError(
             error instanceof Error
               ? error.message
               : "Falha ao carregar movimentos.",
@@ -683,24 +620,25 @@ export default function StockMovementsPage() {
           setMovementsLoading(false);
         }
       };
-      fetchMovements();
-    }, [session, appliedMovementFilters]);
+    fetchMovements();
+  }, [session, appliedMovementFilters]);
 
     useEffect(() => {
-      if (!session) return;
-      const fetchSummary = async () => {
-        setSummaryLoading(true);
-        setSummaryError(null);
-        try {
-          const response = await getMovementSummary(session, {
-            from: appliedSummaryFilters.from,
-            to: appliedSummaryFilters.to,
-            itemId: parseNumber(appliedSummaryFilters.itemId),
-          });
-          setSummary(response);
-        } catch (error) {
-          setSummary(null);
-          setSummaryError(
+    if (!session || !appliedSummaryFilters) return;
+    const fetchSummary = async () => {
+      setSummaryLoading(true);
+      setSummaryError(null);
+      try {
+        const response = await getMovementSummary(session, {
+          from: appliedSummaryFilters.from,
+          to: appliedSummaryFilters.to,
+          itemId: parseNumber(appliedSummaryFilters.itemId),
+          cdemp: session.warehouse ?? undefined,
+        });
+        setSummary(response);
+      } catch (error) {
+        setSummary(null);
+        setSummaryError(
             error instanceof Error
               ? error.message
               : "Falha ao carregar resumo.",
@@ -713,7 +651,7 @@ export default function StockMovementsPage() {
     }, [session, appliedSummaryFilters]);
 
     useEffect(() => {
-      if (!session) return;
+      if (!session || !appliedKardexFilters) return;
       const itemId = parseNumber(appliedKardexFilters.itemId);
       if (!itemId) {
         setKardex([]);
@@ -726,6 +664,7 @@ export default function StockMovementsPage() {
           const response = await getItemKardex(session, itemId, {
             from: appliedKardexFilters.from || undefined,
             to: appliedKardexFilters.to || undefined,
+            cdemp: session.warehouse ?? undefined,
           });
           setKardex(response);
         } catch (error) {
@@ -747,19 +686,51 @@ export default function StockMovementsPage() {
         setCounterpartyResults([]);
         return;
       }
-  
-    const source =
-      movementForm.type === "E" ? fornecedores : clientes;
-  
-    const term = counterpartySearch.toLowerCase();
-  
-    const filtered = source.filter((x) =>
-      x.name.toLowerCase().includes(term) ||
-      x.code.toLowerCase().includes(term)
-    );
-  
-    setCounterpartyResults(filtered);
-  }, [counterpartySearch, movementForm.type, clientes, fornecedores]);
+
+      let cancelled = false;
+
+      const fetchSource = async () => {
+        if (movementForm.type === "E") {
+          if (!fornecedoresLoaded.current || fornecedores.length === 0) {
+            return fetchFornecedores();
+          }
+          return fornecedores;
+        }
+
+        if (!clientesLoaded.current || clientes.length === 0) {
+          return fetchClientes();
+        }
+        return clientes;
+      };
+
+      const filterCounterparty = async () => {
+        const source = await fetchSource();
+        const term = counterpartySearch.toLowerCase();
+
+        const filtered = (source ?? []).filter(
+          (x) =>
+            x.name.toLowerCase().includes(term) ||
+            x.code.toLowerCase().includes(term),
+        );
+
+        if (!cancelled) {
+          setCounterpartyResults(filtered);
+        }
+      };
+
+      filterCounterparty();
+
+      return () => {
+        cancelled = true;
+      };
+    }, [
+      counterpartySearch,
+      movementForm.type,
+      clientes,
+      fornecedores,
+      fetchClientes,
+      fetchFornecedores,
+    ]);
 
   const totalEntries = useMemo(() => {
     const entries = movements.filter((movement) => movement.type === "E");
@@ -771,6 +742,20 @@ export default function StockMovementsPage() {
       exits: sum(exits),
     };
   }, [movements]);
+
+  const displayedMovements = useMemo(() => {
+    const lastItems = movements.slice(-15);
+    return lastItems.reverse();
+  }, [movements]);
+
+  const formatDateOnly = (value?: string) => {
+    if (!value) return "-";
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.valueOf())) return "-";
+    return new Intl.DateTimeFormat("pt-BR", { dateStyle: "short" }).format(
+      parsed,
+    );
+  };
 
   return (
     <div className="space-y-6">
@@ -785,80 +770,26 @@ export default function StockMovementsPage() {
         description="Lançamento direto na tabela de movimentações de estoque"
       >
         <div>
-            <label className="text-xs font-semibold text-slate-500">
-              Localizar item existente
-            </label>
-
-            <input
-              value={searchTerm}
-              onFocus={() => searchTerm.trim() && setShowSearchResults(true)}
-              onChange={(event) => {
-                setSearchTerm(event.target.value);
-                setShowSearchResults(true);
-                setHighlightIndex(-1);
-              }}
-              onKeyDown={(event) => {
-                if (!showSearchResults || searchResults.length === 0) return;
-
-                if (event.key === "ArrowDown") {
-                  event.preventDefault();
-                  setHighlightIndex((prev) =>
-                    prev < searchResults.length - 1 ? prev + 1 : prev
-                  );
-                }
-
-                if (event.key === "ArrowUp") {
-                  event.preventDefault();
-                  setHighlightIndex((prev) => (prev > 0 ? prev - 1 : prev));
-                }
-
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  if (highlightIndex >= 0) {
-                    handleSelectItem(searchResults[highlightIndex]);
-                    setHighlightIndex(-1);
-                  }
-                }
-              }}
-              placeholder="Digite parte do nome, código ou código de barras"
-              className="mt-1 w-full rounded-xl border border-slate-200 px-4 py-2"
-            />
-
-            {searchTerm.trim() && showSearchResults ? (
-              <div className="relative mt-2">
-                {searchResults.length > 0 ? (
-                  <div className="absolute z-10 max-h-64 w-full divide-y divide-slate-100 overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-lg">
-                    {searchResults.map((item, index) => (
-                      <button
-                        type="button"
-                        key={item.id}
-                        onClick={() => {
-                          handleSelectItem(item);
-                          setHighlightIndex(-1);
-                        }}
-                        className={`w-full px-4 py-3 text-left 
-                          ${index === highlightIndex ? "bg-blue-100" : "bg-white"}
-                          hover:bg-blue-50 focus:bg-blue-50`}
-                      >
-                        <p className="text-sm font-semibold text-slate-900">
-                          {item.name}
-                        </p>
-                        <p className="text-xs text-slate-500">
-                          SKU: {item.sku}
-                          {item.barcode ? ` • Barras: ${item.barcode}` : ""}
-                        </p>
-                      </button>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-xs text-slate-500">
-                    Nenhum item encontrado com os filtros informados.
-                  </p>
-                )}
-              </div>
-            ) : null}
+          <SearchLookup
+            label="Localizar item existente"
+            table="t_itens"
+            descriptionField="descricao"
+            codeField="cditem"
+            barcodeField="barcodeit"
+            placeholder="Digite parte do nome, código ou código de barras"
+            defaultValue={selectedItemLabel}
+            onSelect={(option: SearchOption) => {
+              const normalized = normalizeItemFromApi(
+                (option.raw ?? {}) as AnyRecord,
+                option.id ?? `item-${Date.now()}`,
+              );
+              setSelectedItemLabel(option.label ?? normalized.name);
+              handleSelectItem(normalized);
+            }}
+          />
         </div>
-  
+
+
 
         <form
           className="grid grid-cols-1 md:grid-cols-3 gap-4"
@@ -902,7 +833,7 @@ export default function StockMovementsPage() {
             </label>
             <input
               type="number"
-              step="0.01"
+              step="0.001"
               min="0"
               value={movementForm.quantity}
               onChange={(event) =>
@@ -921,7 +852,7 @@ export default function StockMovementsPage() {
             </label>
             <input
               type="number"
-              step="0.01"
+              step="0.001"
               min="0"
               value={movementForm.unitPrice}
               onChange={(event) =>
@@ -1064,7 +995,7 @@ export default function StockMovementsPage() {
                           hover:bg-blue-50 focus:bg-blue-50`}
                       >
                         <p className="text-sm font-semibold text-slate-900">
-                          {item.code} — {item.name}
+              {item.code} — {item.name}
                         </p>
                       </button>
                     ))}
@@ -1174,7 +1105,7 @@ export default function StockMovementsPage() {
           <div className="md:col-span-3">
             <button
               type="submit"
-              className="w-full bg-blue-600 text-white py-3 rounded-2xl font-semibold"
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-2xl font-semibold cursor-pointer transition"
             >
               Registrar movimento
             </button>
@@ -1184,14 +1115,27 @@ export default function StockMovementsPage() {
 
       <SectionCard
         title="Movimentações recentes"
-        description="Filtre entradas ou saídas em um período"
+            description="Filtre entradas ou saídas em um período"
       >
         <div className="space-y-4">
           <form
             className="grid grid-cols-1 md:grid-cols-4 gap-4"
             onSubmit={(event) => {
               event.preventDefault();
-              setAppliedMovementFilters(movementFilters);
+              const normalizedItemId = (movementItemCandidate || "").trim();
+              if (!normalizedItemId) {
+                setMovementItemCandidate("");
+                setAppliedMovementFilters({
+                  ...movementFilters,
+                  itemId: "",
+                });
+              } else {
+                setMovementItemCandidate(normalizedItemId);
+                setAppliedMovementFilters({
+                  ...movementFilters,
+                  itemId: normalizedItemId,
+                });
+              }
             }}
           >
             <div>
@@ -1245,24 +1189,24 @@ export default function StockMovementsPage() {
               />
             </div>
             <div>
-              <label className="text-xs font-semibold text-slate-500">
-                Item (opcional)
-              </label>
-              <input
-                value={movementFilters.itemId}
-                onChange={(event) =>
-                  setMovementFilters({
-                    ...movementFilters,
-                    itemId: event.target.value,
-                  })
+              <SearchLookup
+                label="Item (opcional)"
+                table="t_itens"
+                descriptionField="descricao"
+                codeField="cditem"
+                barcodeField="barcodeit"
+                placeholder="Digite parte do nome, código ou SKU"
+                defaultValue={movementItemCandidate}
+                onClear={() => setMovementItemCandidate("")}
+                onSelect={(option: SearchOption) =>
+                  setMovementItemCandidate(option.id || option.code || "")
                 }
-                className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2"
               />
             </div>
             <div className="md:col-span-4 flex justify-end">
               <button
                 type="submit"
-                className="bg-slate-900 text-white px-4 py-2 rounded-xl text-sm font-semibold"
+                className="bg-slate-900 hover:bg-slate-700 text-white px-4 py-2 rounded-xl text-sm font-semibold transition cursor-pointer shadow-sm hover:shadow-md"
               >
                 Aplicar filtros
               </button>
@@ -1293,46 +1237,55 @@ export default function StockMovementsPage() {
               <table className="w-full text-sm">
                 <thead className="text-left text-xs uppercase text-slate-500">
                   <tr>
-                    <th className="px-4 py-2">Lançamento</th>
-                    <th className="px-4 py-2">Item</th>
-                    <th className="px-4 py-2">Tipo</th>
-                    <th className="px-4 py-2">Quantidade</th>
-                    <th className="px-4 py-2">Valor</th>
-                    <th className="px-4 py-2">Documento</th>
-                    <th className="px-4 py-2">Data</th>
+                    <th className="px-2 py-2 w-16">Lanc.</th>
+                    <th className="px-2 py-2">Item</th>
+                    <th className="px-2 py-2 w-10">Tipo</th>
+                    <th className="px-2 py-2">Quantidade</th>
+                    <th className="px-2 py-2">Valor</th>
+                    <th className="px-2 py-2 w-20">Documento</th>
+                    <th className="px-2 py-2 w-20">Data</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {movements.map((movement) => (
-                    <tr
-                      key={movement.id}
-                      className="border-t border-slate-100 hover:bg-slate-50"
-                    >
-                      <td className="px-4 py-2 font-semibold text-slate-900">
-                        #{movement.id}
-                      </td>
-                      <td className="px-4 py-2">{movement.itemId}</td>
-                      <td className="px-4 py-2">
-                        {movement.type === "E" ? "Entrada" : "Saída"}
-                      </td>
-                      <td className="px-4 py-2">
-                        {movement.quantity.toFixed(2)}
-                      </td>
-                      <td className="px-4 py-2">
-                        {movement.totalValue
-                          ? formatCurrency(movement.totalValue)
-                          : "-"}
-                      </td>
-                      <td className="px-4 py-2">
-                        {movement.document?.number
-                          ? `#${movement.document.number}`
-                          : "-"}
-                      </td>
-                      <td className="px-4 py-2">
-                        {movement.date ? formatDate(movement.date) : "-"}
-                      </td>
-                    </tr>
-                  ))}
+                  {displayedMovements.map((movement) => {
+                    const itemCode =
+                      movement.itemCode ??
+                      (movement.itemId !== undefined
+                        ? String(movement.itemId)
+                        : "");
+                    const itemDescription = movement.itemLabel ?? "";
+                    const itemDisplay = [itemCode, itemDescription]
+                      .filter(Boolean)
+                      .join(" - ");
+                    return (
+                      <tr
+                        key={movement.id}
+                        className="border-t border-slate-100 hover:bg-slate-50"
+                      >
+                        <td className="px-2 py-2 font-semibold text-slate-900 w-16">
+                          #{String(movement.id).slice(0, 7)}
+                        </td>
+                        <td className="px-2 py-2">{itemDisplay || "-"}</td>
+                        <td className="px-2 py-2 w-10">{movement.type}</td>
+                        <td className="px-2 py-2">
+                          {movement.quantity.toFixed(2)}
+                        </td>
+                        <td className="px-2 py-2">
+                          {movement.totalValue
+                            ? formatCurrency(movement.totalValue)
+                            : "-"}
+                        </td>
+                        <td className="px-2 py-2 w-24">
+                          {movement.document?.number
+                            ? `#${String(movement.document.number).slice(0, 7)}`
+                            : "-"}
+                        </td>
+                        <td className="px-2 py-2 w-24">
+                          {formatDateOnly(movement.date)}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1348,7 +1301,11 @@ export default function StockMovementsPage() {
           className="grid grid-cols-1 md:grid-cols-4 gap-4"
           onSubmit={(event) => {
             event.preventDefault();
-            setAppliedSummaryFilters(summaryFilters);
+            const normalizedItemId = (summaryItemCandidate || "").trim();
+            setAppliedSummaryFilters({
+              ...summaryFilters,
+              itemId: normalizedItemId,
+            });
           }}
         >
           <div>
@@ -1382,24 +1339,24 @@ export default function StockMovementsPage() {
             />
           </div>
           <div>
-            <label className="text-xs font-semibold text-slate-500">
-              Item (opcional)
-            </label>
-            <input
-              value={summaryFilters.itemId}
-              onChange={(event) =>
-                setSummaryFilters({
-                  ...summaryFilters,
-                  itemId: event.target.value,
-                })
+            <SearchLookup
+              label="Item (opcional)"
+              table="t_itens"
+              descriptionField="descricao"
+              codeField="cditem"
+              barcodeField="barcodeit"
+              placeholder="Digite parte do nome, código ou SKU"
+              defaultValue={summaryItemCandidate}
+              onClear={() => setSummaryItemCandidate("")}
+              onSelect={(option: SearchOption) =>
+                setSummaryItemCandidate(option.id || option.code || "")
               }
-              className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2"
             />
           </div>
           <div className="md:col-span-1 flex items-end">
             <button
               type="submit"
-              className="w-full bg-slate-900 text-white py-2 rounded-xl text-sm font-semibold"
+              className="w-full bg-slate-900 hover:bg-slate-700 text-white py-2 rounded-xl text-sm font-semibold transition cursor-pointer shadow-sm hover:shadow-md"
             >
               Atualizar
             </button>
@@ -1457,23 +1414,26 @@ export default function StockMovementsPage() {
           className="grid grid-cols-1 md:grid-cols-4 gap-4"
           onSubmit={(event) => {
             event.preventDefault();
-            setAppliedKardexFilters(kardexFilters);
+            const normalizedItemId = (kardexItemCandidate || "").trim();
+            setAppliedKardexFilters({
+              ...kardexFilters,
+              itemId: normalizedItemId,
+            });
           }}
         >
           <div>
-            <label className="text-xs font-semibold text-slate-500">
-              Item (ID)
-            </label>
-            <input
-              value={kardexFilters.itemId}
-              onChange={(event) =>
-                setKardexFilters({
-                  ...kardexFilters,
-                  itemId: event.target.value,
-                })
+            <SearchLookup
+              label="Item (ID)"
+              table="t_itens"
+              descriptionField="descricao"
+              codeField="cditem"
+              barcodeField="barcodeit"
+              placeholder="Digite parte do nome, código ou SKU"
+              defaultValue={kardexItemCandidate}
+              onClear={() => setKardexItemCandidate("")}
+              onSelect={(option: SearchOption) =>
+                setKardexItemCandidate(option.id || option.code || "")
               }
-              required
-              className="mt-1 w-full border border-slate-200 rounded-xl px-3 py-2"
             />
           </div>
           <div>
@@ -1507,7 +1467,7 @@ export default function StockMovementsPage() {
           <div className="md:col-span-1 flex items-end">
             <button
               type="submit"
-              className="w-full bg-slate-900 text-white py-2 rounded-xl text-sm font-semibold"
+              className="w-full bg-slate-900 hover:bg-slate-700 text-white py-2 rounded-xl text-sm font-semibold transition cursor-pointer shadow-sm hover:shadow-md"
             >
               Carregar kardex
             </button>

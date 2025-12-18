@@ -7,6 +7,7 @@ import { api } from "@/modules/core/services/api";
 import { formatCurrency } from "@/modules/core/utils/formatters";
 import Link from "next/link";
 import { Pencil } from "lucide-react";
+import { SearchLookup, SearchOption } from "@/modules/core/components/SearchLookup";
 
 type AnyRecord = Record<string, unknown>;
 
@@ -131,19 +132,25 @@ type Filters = {
   group: string;
   isRaw: string; // "S" | "N" | ""
   saldo: "COM" | "SEM" | "AMBOS";
+  itemId: string;
 };
 
 export default function ItemListPage() {
   const { session } = useSession();
   const [items, setItems] = useState<ItemRow[]>([]);
   const [groups, setGroups] = useState<GroupOption[]>([]);
+  const [groupsLoaded, setGroupsLoaded] = useState(false);
   const [filters, setFilters] = useState<Filters>({
     description: "",
     group: "",
     isRaw: "",
     saldo: "AMBOS",
+    itemId: "",
   });
-  const [appliedFilters, setAppliedFilters] = useState<Filters>(filters);
+  const [descriptionCandidate, setDescriptionCandidate] = useState("");
+  const [descriptionItemIdCandidate, setDescriptionItemIdCandidate] =
+    useState("");
+  const [appliedFilters, setAppliedFilters] = useState<Filters | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize] = useState(10);
   const [total, setTotal] = useState(0);
@@ -156,34 +163,39 @@ export default function ItemListPage() {
   );
 
   const loadGroups = useCallback(async () => {
+    if (groupsLoaded) return;
     try {
       const response = await api.get("/T_GRITENS");
       const raw = extractArray<AnyRecord>(response.data);
       setGroups(
         raw.map((item, index) => normalizeGroup(item, `group-${index}`)),
       );
+      setGroupsLoaded(true);
     } catch (err) {
       console.error("Falha ao carregar grupos", err);
     }
-  }, []);
+  }, [groupsLoaded]);
 
   const loadItems = useCallback(async () => {
-    if (!session) return;
+    if (!session || !appliedFilters) return;
     setLoading(true);
     setError(null);
     try {
+      const params = {
+        page,
+        pageSize,
+        descricaoPrefix: appliedFilters.description || undefined,
+        cdgruit: appliedFilters.group || undefined,
+        matprima: appliedFilters.isRaw || undefined,
+        cditem: appliedFilters.itemId || undefined,
+        includeSaldo: true,
+        cdemp: session?.warehouse || undefined,
+        ativosn: "S",
+        saldo: appliedFilters.saldo || "AMBOS",
+      };
+      console.log("[Itens] GET /t_itens params:", params);
       const response = await api.get("/t_itens", {
-        params: {
-          page,
-          pageSize,
-          descricaoPrefix: appliedFilters.description || undefined,
-          cdgruit: appliedFilters.group || undefined,
-          matprima: appliedFilters.isRaw || undefined,
-          includeSaldo: true,
-          cdemp: session?.tenant?.enterprise || undefined,
-          ativosn: "S",
-          saldo: appliedFilters.saldo || "AMBOS",
-        },
+        params,
       });
 
       const payload = response.data;
@@ -208,33 +220,28 @@ export default function ItemListPage() {
       setLoading(false);
     }
   }, [
-    appliedFilters.description,
-    appliedFilters.group,
-    appliedFilters.isRaw,
-    appliedFilters.saldo,
+    appliedFilters,
     page,
     pageSize,
     session,
   ]);
 
   useEffect(() => {
-    loadGroups();
-  }, [loadGroups]);
-
-  useEffect(() => {
     loadItems();
   }, [loadItems]);
 
   const applyFilters = () => {
-    setAppliedFilters(filters);
+    const normalizedDescription = (descriptionCandidate || "").trim();
+    const normalizedItemId = (descriptionItemIdCandidate || "").trim();
+    const composedFilters = {
+      ...filters,
+      description: normalizedDescription,
+      itemId: normalizedItemId,
+    };
+    setFilters(composedFilters);
     setPage(1);
-  };
-
-  const resetFilters = () => {
-    const clean: Filters = { description: "", group: "", isRaw: "", saldo: "AMBOS" };
-    setFilters(clean);
-    setAppliedFilters(clean);
-    setPage(1);
+    setAppliedFilters(composedFilters);
+    loadGroups();
   };
 
   const handlePrint = () => {
@@ -339,19 +346,26 @@ export default function ItemListPage() {
       >
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
           <div className="md:col-span-2">
-            <label className="text-xs font-semibold text-slate-500">
-              Descrição
-            </label>
-            <input
-              value={filters.description}
-              onChange={(event) =>
-                setFilters((prev) => ({
-                  ...prev,
-                  description: event.target.value,
-                }))
-              }
+            <SearchLookup
+              label="Descrição"
+              table="t_itens"
+              descriptionField="descricao"
+              codeField="cditem"
+              barcodeField="barcodeit"
               placeholder="Parte da descrição"
-              className="mt-1 w-full rounded-xl border border-slate-200 px-3 py-2"
+              defaultValue={descriptionCandidate}
+              onClear={() => {
+                setDescriptionCandidate("");
+                setDescriptionItemIdCandidate("");
+              }}
+              onSelect={(option: SearchOption) => {
+                setDescriptionCandidate(option.label || option.code || "");
+                setDescriptionItemIdCandidate(option.code || option.id || "");
+              }}
+              onChange={(value) => {
+                setDescriptionCandidate(value);
+                setDescriptionItemIdCandidate("");
+              }}
             />
           </div>
           <div>
@@ -418,14 +432,6 @@ export default function ItemListPage() {
             disabled={loading}
           >
             {loading ? "Aplicando..." : "Aplicar filtros"}
-          </button>
-          <button
-            type="button"
-            onClick={resetFilters}
-            className="px-4 py-2 rounded-xl text-sm font-semibold border border-slate-200 text-slate-600 disabled:opacity-50"
-            disabled={loading}
-          >
-            Limpar
           </button>
           <div className="text-xs text-slate-500 self-center">
             Página {page} de {totalPages} • {total} registros

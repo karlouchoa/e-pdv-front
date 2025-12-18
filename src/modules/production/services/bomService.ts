@@ -18,8 +18,11 @@ const mapBom = (r: any): BomRecord => {
     items: (r.items ?? []).map((i: any) => ({
       componentCode: i.component_code ?? "",
       description: i.description ?? "",
-      quantity: Number(i.quantity ?? 0),
+      // Backend envia quantity_base; usamos como quantity e mantemos também quantity_base
+      quantity: Number(i.quantity_base ?? i.quantity ?? 0),
+      quantity_base: Number(i.quantity_base ?? i.quantity ?? 0),
       unitCost: Number(i.unit_cost ?? 0),
+      fator: Number(i.fator ?? 1),
     })),
   };
 
@@ -42,6 +45,7 @@ const mapBom = (r: any): BomRecord => {
 // ---------------------------------------------
 export async function listBomsAxios(): Promise<BomRecord[]> {
   const { data } = await api.get("/production/bom");
+  console.log("[GET /production/bom] resposta crua:", data);
   return Array.isArray(data) ? data.map(mapBom) : [];
 }
 
@@ -50,6 +54,7 @@ export async function listBomsAxios(): Promise<BomRecord[]> {
 // ---------------------------------------------
 export async function getBomAxios(id: string): Promise<BomRecord> {
   const { data } = await api.get(`/production/bom/${id}`);
+  console.log(`[GET /production/bom/${id}] resposta crua:`, data);
   return mapBom(data);
 }
 
@@ -68,8 +73,10 @@ export async function createBomAxios(payload: BomPayload): Promise<BomRecord> {
     items: payload.items.map((i) => ({
       component_code: i.componentCode,
       description: i.description,
-      quantity: i.quantity,
+      quantity: i.quantity_base,
+      quantity_base: i.quantity_base,
       unit_cost: i.unitCost,
+      fator: i.fator,
     })),
   };
 
@@ -99,8 +106,10 @@ export async function updateBomAxios(
     body.items = payload.items.map((i) => ({
       component_code: i.componentCode,
       description: i.description,
-      quantity: i.quantity,
+      quantity: i.quantity_base ?? i.quantity,
+      quantity_base: i.quantity_base ?? i.quantity,
       unit_cost: i.unitCost,
+      fator: i.fator,
     }));
   }
 

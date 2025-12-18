@@ -69,9 +69,9 @@ api.interceptors.request.use((config) => {
       const fullUrl = `${config.baseURL}${config.url}`;
       // console.log("[AXIOS REQUEST] URL:", fullUrl);
     
-      if (config.params) {
-        // console.log("[AXIOS REQUEST] Params:", config.params);
-      }
+      // if (config.params) {
+      //    console.log("[AXIOS REQUEST] Params:", config.params);
+      // }
 
     }
   } catch (err) {

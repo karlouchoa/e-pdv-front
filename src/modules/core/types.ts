@@ -115,6 +115,8 @@ export interface BomItemPayload {
   description?: string;
   quantity: number;
   unitCost: number;
+  quantity_base: number,
+  fator?: number;
 }
 
 export interface BomPayload {
@@ -134,6 +136,7 @@ export interface BomRecord extends BomPayload {
   unitCost: number;
   createdAt?: string;
   updatedAt?: string;
+  percentage?: number;
 }
 
 export interface ProductionOrderPayload {
@@ -327,6 +330,8 @@ export interface InventoryCounterpartyInfo {
 export interface InventoryMovementRecord {
   id: number;
   itemId: number;
+  itemCode?: string;
+  itemLabel?: string;
   date: string;
   type: InventoryMovementType;
   quantity: number;

@@ -46,6 +46,8 @@ const defaultItem: BomItemPayload = {
   description: "",
   quantity: 1,
   unitCost: 0,
+  quantity_base: 1,
+  fator: 1,
 };
 
 const MAX_CODE_LENGTH = 80;
@@ -201,54 +203,37 @@ const normalizeCatalogItem = (
   };
 };
 
-// const normalizeFormulaComponent = (raw: AnyRecord): BomItemPayload => {
-//   const record = toRecord(raw);
-//   const componentCode = getStringValue(
-//     record,
-//     [
-//       "componentCode",
-//       "component_code",
-//       "cdcomponente",
-//       "cdmatprima",
-//       "cdmp",
-//       "cditemmp",
-//       "cdinsumo",
-//     ],
-//     "",
-//   );
-//   return {
-//     componentCode: componentCode || "",
-//     description: getStringValue(
-//       record,
-//       ["description", "desccomponente", "dematprima", "deitemmp", "deitem"],
-//       "",
-//     ),
-//     quantity: getNumberValue(
-//       record,
-//       ["quantity", "qtde", "quantidade", "qtitem", "qtcomponent", "qtinsumo"],
-//       0,
-//     ),
-//     unitCost: getNumberValue(
-//       record,
-//       [
-//         "unitCost",
-//         "unit_cost",
-//         "custocomponente",
-//         "custo",
-//         "vlrcusto",
-//         "vlr_custo",
-//         "custounit",
-//       ],
-//       0,
-//     ),
-//   };
-// };
-
 const normalizeFormulaComponent = (raw: AnyRecord): BomItemPayload => {
   const record = toRecord(raw);
 
   // Garantir que materiaPrima exista como objeto
   const joined = (record.materiaPrima ?? record.materiaprima ?? {}) as AnyRecord;
+  const baseQty = getNumberValue(
+    record,
+    ["quantity_base", "qtBase", "qt_base"],
+    Number.NaN,
+  );
+  const rawQty = getNumberValue(
+    record,
+    [
+      "qtdemp",
+      "quantity",
+      "qtde",
+      "quantidade",
+      "qtitem",
+      "qtcomponent",
+      "qtinsumo",
+    ],
+    Number.NaN,
+  );
+  const resolvedQty = Number.isFinite(baseQty) ? baseQty : rawQty;
+  const resolvedBase =
+    Number.isFinite(baseQty) && baseQty !== null
+      ? baseQty
+      : Number.isFinite(rawQty)
+        ? rawQty
+        : 0;
+  const resolvedFator = getNumberValue(record, ["fator"], Number.NaN);
 
   return {
     componentCode: getStringValue(
@@ -279,19 +264,8 @@ const normalizeFormulaComponent = (raw: AnyRecord): BomItemPayload => {
       "",
     ),
 
-    quantity: getNumberValue(
-      record,
-      [
-        "qtdemp",
-        "quantity",
-        "qtde",
-        "quantidade",
-        "qtitem",
-        "qtcomponent",
-        "qtinsumo",
-      ],
-      0,
-    ),
+    // Exibe a quantidade base enviada pelo backend (quantity_base) ou, se ausente, a quantity
+    quantity: Number.isFinite(resolvedQty) ? resolvedQty : 0,
 
     unitCost:
       // 1) primeiro tenta pegar do JOIN
@@ -314,7 +288,10 @@ const normalizeFormulaComponent = (raw: AnyRecord): BomItemPayload => {
           "custounit",
         ],
         0,
-      )
+      ),
+    quantity_base: Number.isFinite(resolvedBase) ? resolvedBase : 0,
+    // Fator enviado pelo backend (fator)
+    fator: Number.isFinite(resolvedFator) ? resolvedFator : undefined,
   };
 };
 
@@ -342,6 +319,19 @@ export default function BomPage() {
   const [pendingQuantityFocusIndex, setPendingQuantityFocusIndex] = useState<
     number | null
   >(null);
+  const [perctDrafts, setperctDrafts] = useState<string[]>([]);
+
+  useEffect(() => {
+    setperctDrafts((prev) => {
+      if (prev.length === items.length) return prev;
+      return items.map((item, index) => {
+        const fallbackFator = Number.isFinite((item as any).percentage)
+          ? Number((item as any).percentage) / 100
+          : 1;
+        return prev[index] ?? formatPct(item.fator ?? fallbackFator);
+      });
+    });
+  }, [items]);
 
   const [version, setVersion] = useState("1.0");
 
@@ -411,7 +401,8 @@ export default function BomPage() {
         const rawItems = extractArray<AnyRecord>(response);
         const normalized = rawItems
           .map((record) => normalizeFormulaComponent(record))
-          .filter((entry) => entry.componentCode || entry.description);
+          .filter((entry) => entry.componentCode || entry.description)
+          .map(withperct);
        
         // console.log("🔧 ITENS NORMALIZADOS QUE IRÃO PARA A TABELA:", normalized); // ⬅ AQUI
 
@@ -447,10 +438,44 @@ export default function BomPage() {
     return v;
   };
 
+  const toSeven = (value: number) => Number(value.toFixed(7));
+
+const formatPct = (value: number) => {
+  if (!Number.isFinite(value)) return "";
+  const trimmed = value.toFixed(4).replace(/\.?0+$/, "");
+  return trimmed.replace(".", ",");
+};
+
+const withperct = (item: BomItemPayload): BomItemPayload => ({
+  ...item,
+  fator: (() => {
+    if (Number.isFinite(item.fator)) return Number(item.fator);
+    if (Number.isFinite((item as any).percentage))
+      return Number((item as any).percentage) / 100;
+    return 1;
+  })(),
+});
+
+  const getItemTotal = (item: BomItemPayload) => {
+    const fator = (() => {
+      if (Number.isFinite(item.fator)) return Number(item.fator);
+      if (Number.isFinite((item as any).percentage)) {
+        return Number((item as any).percentage) / 100;
+      }
+      return 1;
+    })();
+    const normalizedPct = toSeven(fator);
+    const baseQty = Number.isFinite((item as any).quantity_base)
+      ? Number((item as any).quantity_base)
+      : item.quantity;
+    const effectiveQty = toSeven(baseQty * normalizedPct);
+    return toSeven(effectiveQty * item.unitCost);
+  };
+
   const totals = useMemo(() => {
     return calculateBomTotals({
       ...bomData,
-      items,
+      items: items.map(withperct),
     });
   }, [bomData, items]);
 
@@ -462,12 +487,24 @@ export default function BomPage() {
     setItems((prev) => {
       const copy = [...prev];
       const current = copy[index];
+      const numericFields: Array<keyof BomItemPayload> = [
+        "quantity",
+        "unitCost",
+        "fator",
+        "quantity_base",
+      ];
+      const numericValue = Number(value);
+      const parsed =
+        numericFields.includes(field) && Number.isFinite(numericValue)
+          ? numericValue
+          : value;
+
       copy[index] = {
         ...current,
-        [field]:
-          field === "quantity" || field === "unitCost"
-            ? Number(value)
-            : value,
+        [field]: parsed as any,
+        ...(field === "quantity"
+          ? { quantity_base: Number.isFinite(numericValue) ? numericValue : current.quantity_base }
+          : {}),
       };
       return copy;
     });
@@ -480,9 +517,18 @@ export default function BomPage() {
   };
 
   const removeItem = (index: number) => {
-    setItems((prev) => prev.filter((_, position) => position !== index));
+    setItems((prev) => {
+      const next = prev.filter((_, position) => position !== index);
+      return next.length > 0 ? next : [{ ...defaultItem }];
+    });
     quantityInputsRef.current.splice(index, 1);
     unitCostInputsRef.current.splice(index, 1);
+    setperctDrafts((prev) => {
+      const next = prev.filter((_, position) => position !== index);
+      return next.length > 0
+        ? next
+        : [formatPct(defaultItem.fator  ?? 1)];
+    });
   };
 
   const handleSelectProduct = (item: CatalogItem) => {
@@ -524,6 +570,7 @@ export default function BomPage() {
         componentCode: material.code,
         description: material.description,
         quantity: currentQuantity,
+        quantity_base: currentQuantity,
         unitCost: material.cost,
       };
   
@@ -563,7 +610,14 @@ export default function BomPage() {
       componentCode: String(item.componentCode ?? "").trim(),
       description: String(item.description ?? "").trim(),
       quantity: Number(item.quantity),
+      quantity_base: Number(item.quantity_base ?? item.quantity),
       unitCost: Number(item.unitCost),
+      fator: (() => {
+        if (Number.isFinite(item.fator)) return Number(item.fator);
+        if (Number.isFinite((item as any).percentage))
+          return Number((item as any).percentage) / 100;
+        return 1;
+      })(),
     }));
   
     const hasInvalidItem = sanitizedItems.some((item) => {
@@ -622,28 +676,29 @@ export default function BomPage() {
       marginTarget,
       marginAchieved: marginAchievedValue,
       notes: bomData.notes ?? null,
-      items: validItems.map((i) => ({
-        componentCode: i.componentCode,
-        description: i.description,
-        quantity: i.quantity,
-        unitCost: i.unitCost,
+      items: validItems.map((item) => ({
+        componentCode: item.componentCode,
+        description: item.description,
+        quantity: item.quantity,
+        quantity_base: item.quantity_base ?? item.quantity,
+        unitCost: item.unitCost,
+        fator: Number.isFinite(item.fator)
+          ? Number(item.fator)
+          : 1,
       })),
     };
-  
-    // console.log("📦 PAYLOAD FINAL PARA O BACKEND:", payload);
   
     // -------------------------------
     // CHAMADA AXIOS DIRETA — SIMPLES
     // -------------------------------
     setSaving(true);
     try {
+    
+      console.log("📦 PAYLOAD FINAL PARA O BACKEND:", payload);
       const response = await api.post("/production/bom", payload);
   
       const savedBom = response.data;
       // console.log("📌 BOM salva com sucesso:", savedBom);
-  
-      // adiciona no topo da lista
-
       const savedId = savedBom.id;
       const fullBom = await api.get(`/production/bom/${savedId}`);
       setBoms(prev => {
@@ -910,15 +965,14 @@ export default function BomPage() {
                 <th className="px-4 py-2">MP</th>
                 <th className="px-4 py-2">Descricao</th>
                 <th className="px-4 py-2">Qtd</th>
-                <th className="px-4 py-2">Custo unit</th>
-                <th className="px-4 py-2">Total</th>
-                <th className="px-4 py-2"></th>
+                <th className="px-4 py-2">Fator</th>
+                <th className="px-4 py-2 text-right">Remover</th>
               </tr>
             </thead>
             <tbody>
               {items.map((item, index) => (
                 <tr key={index} className="border-t border-slate-100">
-                  <td className="px-4 py-2 w-64">
+                  <td className="px-2 py-2 w-48">
                     <input
                       value={item.componentCode}
                       onKeyDown={(e) => {
@@ -935,7 +989,7 @@ export default function BomPage() {
                       className="w-full border border-slate-200 rounded-xl px-3 py-2"
                     />
                   </td>
-                  <td className="px-4 py-2 w-48">
+                  <td className="px-2 py-2 w-48">
                     <input
                       type="number"
                       min={0}
@@ -957,41 +1011,67 @@ export default function BomPage() {
                       className="w-full border border-slate-200 rounded-xl px-3 py-2 align-right"
                     />
                   </td>
-                  <td className="px-4 py-2 w-48">
+                  <td className="px-2 py-2 w-64">
                     <input
-                      type="number"
-                      step="0.001"
-                      min={0}
-                      value={normalizeDecimal(item.unitCost)}
+                      type="text"
+                      inputMode="decimal"
+                      pattern="[0-9.,]*"
+                      value={
+                        perctDrafts[index] ??
+                        formatPct(
+                          Number.isFinite(item.fator)
+                            ? Number(item.fator)
+                            : Number.isFinite((item as any).percentage)
+                              ? Number((item as any).percentage) / 100
+                              : 1,
+                        )
+                      }
                       onKeyDown={(e) => {
                         if (e.key === "Enter") e.preventDefault();
                       }}
-                      onChange={(e) => updateItem(index, "unitCost", e.target.value)}
+                      onChange={(e) => {
+                        const raw = e.target.value.replace(/[^0-9.,]/g, "");
+                        const normalized = raw.replace(",", ".");
+                        updateItem(index, "fator", normalized);
+                        setperctDrafts((prev) => {
+                          const next = [...prev];
+                          next[index] = raw;
+                          return next;
+                        });
+                      }}
                       onBlur={(event) => {
-                        if (event.currentTarget.value === "") {
-                          updateItem(
-                            index,
-                            "unitCost",
-                            String(defaultItem.unitCost),
-                          );
-                        }
+                        const rawValue = event.currentTarget?.value ?? "";
+                          if (rawValue === "") {
+                            updateItem(
+                              index,
+                              "fator",
+                              String(defaultItem.fator  ?? 1),
+                            );
+                            setperctDrafts((prev) => {
+                              const next = [...prev];
+                              next[index] = formatPct(defaultItem.fator  ?? 1);
+                              return next;
+                            });
+                            return;
+                          }
+                        const parsed = Number(rawValue.replace(",", "."));
+                        setperctDrafts((prev) => {
+                          const next = [...prev];
+                          next[index] = formatPct(Number.isFinite(parsed) ? parsed : 0);
+                          return next;
+                        });
                       }}
                       className="w-full border border-slate-200 rounded-xl px-3 py-2 align-right"
                     />
                   </td>
-                  <td className="px-4 py-2 w-36">
-                    {formatCurrency(item.quantity * item.unitCost)}
-                  </td>
                   <td className="px-4 py-2 text-right">
-                    {items.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => removeItem(index)}
-                        className="text-xs text-red-600"
-                      >
-                        Remover
-                      </button>
-                    )}
+                    <button
+                      type="button"
+                      onClick={() => removeItem(index)}
+                      className="text-xs text-red-600"
+                    >
+                      Remover
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -1060,45 +1140,68 @@ export default function BomPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-xs text-slate-500">Custo Unit.</label>
+                  <label className="text-xs text-slate-500">Fator</label>
                   <input
-                    ref={(el) => {
-                      unitCostInputsRef.current[index] = el;
+                    type="text"
+                    inputMode="decimal"
+                    pattern="[0-9.,]*"
+                    value={
+                      perctDrafts[index] ??
+                      formatPct(
+                        Number.isFinite(item.fator)
+                          ? Number(item.fator)
+                          : Number.isFinite((item as any).percentage)
+                            ? Number((item as any).percentage) / 100
+                            : 1,
+                      )
+                    }
+                    onChange={(e) => {
+                      const raw = e.target.value.replace(/[^0-9.,]/g, "");
+                      const normalized = raw.replace(",", ".");
+                      updateItem(index, "fator", normalized);
+                      setperctDrafts((prev) => {
+                        const next = [...prev];
+                        next[index] = raw;
+                        return next;
+                      });
                     }}
-                    type="number"
-                    step="0.001"
-                    min={0}
-                    value={normalizeDecimal(item.unitCost)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter") e.preventDefault();
                     }}
-                    onChange={(e) => updateItem(index, "unitCost", e.target.value)}
                     onBlur={(event) => {
-                      if (event.target.value === "") {
+                      const rawValue = event.currentTarget?.value ?? "";
+                      if (rawValue === "") {
                         updateItem(
                           index,
-                          "unitCost",
-                          String(defaultItem.unitCost),
+                          "fator",
+                          String(defaultItem.fator  ?? 1),
                         );
+                        setperctDrafts((prev) => {
+                          const next = [...prev];
+                          next[index] = formatPct(defaultItem.fator  ?? 1);
+                          return next;
+                        });
+                        return;
                       }
+                      const parsed = Number(rawValue.replace(",", "."));
+                      setperctDrafts((prev) => {
+                        const next = [...prev];
+                        next[index] = formatPct(Number.isFinite(parsed) ? parsed : 0);
+                        return next;
+                      });
                     }}
                     className="w-full border border-slate-200 rounded-xl px-3 py-2 mt-1"
                   />
                 </div>
               </div>
-              <div className="flex justify-between items-center mt-2">
-                <span className="text-sm font-medium">
-                  Total: {formatCurrency(item.quantity * item.unitCost)}
-                </span>
-                {items.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => removeItem(index)}
-                    className="text-xs text-red-600"
-                  >
-                    Remover
-                  </button>
-                )}
+              <div className="flex justify-end items-center mt-2">
+                <button
+                  type="button"
+                  onClick={() => removeItem(index)}
+                  className="text-xs text-red-600"
+                >
+                  Remover
+                </button>
               </div>
             </div>
           ))}
